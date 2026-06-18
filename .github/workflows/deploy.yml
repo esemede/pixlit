@@ -1,0 +1,132 @@
+name: Deploy to Cloudflare Workers
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    name: Build & Deploy
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write   # para comentar preview URL en PRs
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Build (OpenNext → Cloudflare Workers)
+        run: npx opennextjs-cloudflare build
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY }}
+          NEXT_PUBLIC_APP_URL: ${{ github.ref == 'refs/heads/main' && 'https://pixlit.site' || 'https://pixlit-preview.workers.dev' }}
+          NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: ${{ secrets.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY }}
+          NEXT_PUBLIC_PAYPAL_CLIENT_ID: ${{ secrets.NEXT_PUBLIC_PAYPAL_CLIENT_ID }}
+
+      # ── Producción (push a main) ──────────────────────────────────────────
+      - name: Deploy to production
+        if: github.ref == 'refs/heads/main'
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: deploy --config wrangler.jsonc --name pixlit
+          # Worker secrets — se suben automáticamente en cada deploy
+          secrets: |
+            NEXT_PUBLIC_SUPABASE_URL
+            NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
+            SUPABASE_SERVICE_ROLE_KEY
+            NEXT_PUBLIC_APP_URL
+            PP_CLIID
+            PP_SCRT
+            NEXT_PUBLIC_PAYPAL_CLIENT_ID
+            PAYPAL_PLAN_STARTER
+            PAYPAL_MODE
+            PAYPAL_WEBHOOK_ID
+        env:
+          NEXT_PUBLIC_SUPABASE_URL:           ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY }}
+          SUPABASE_SERVICE_ROLE_KEY:          ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          NEXT_PUBLIC_APP_URL:                https://pixlit.site
+          PP_CLIID:                           ${{ secrets.PP_CLIID }}
+          PP_SCRT:                            ${{ secrets.PP_SCRT }}
+          NEXT_PUBLIC_PAYPAL_CLIENT_ID:       ${{ secrets.NEXT_PUBLIC_PAYPAL_CLIENT_ID }}
+          PAYPAL_PLAN_STARTER:                ${{ secrets.PAYPAL_PLAN_STARTER }}
+          PAYPAL_MODE:                        live
+          PAYPAL_WEBHOOK_ID:                  ${{ secrets.PAYPAL_WEBHOOK_ID }}
+
+      # ── Preview (PR) ──────────────────────────────────────────────────────
+      - name: Deploy preview (PR)
+        if: github.event_name == 'pull_request'
+        id: preview
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          # Despliega a un Worker distinto por PR
+          command: deploy --config wrangler.jsonc --name pixlit-pr-${{ github.event.pull_request.number }}
+
+      - name: Comment PR with preview URL
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const prNum = context.issue.number;
+            const workerName = `pixlit-pr-${prNum}`;
+            const previewUrl = `https://${workerName}.workers.dev`;
+            const body = [
+              '## 🚀 Preview desplegado en Cloudflare Workers',
+              '',
+              `**URL:** ${previewUrl}`,
+              '',
+              `**Commit:** \`${{ github.sha }}\``,
+              `**Branch:** \`${{ github.head_ref }}\``,
+              '',
+              '_Este worker de preview se elimina cuando el PR se cierra._',
+            ].join('\n');
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNum,
+            });
+            const existing = comments.find(c =>
+              c.user.type === 'Bot' && c.body.includes('Preview desplegado')
+            );
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prNum,
+                body,
+              });
+            }

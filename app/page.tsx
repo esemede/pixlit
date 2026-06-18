@@ -80,6 +80,12 @@ const tools = [
     name: "Conversor Timestamp",
     desc: "Convierte timestamps Unix a fechas legibles y viceversa.",
   },
+  {
+    href: "/tools/notebook",
+    icon: "📓",
+    name: "Cuaderno de Notas",
+    desc: "Dibuja y escribe con stylus, touch o mouse. Páginas múltiples y exportación PNG.",
+  },
 ];
 
 const proFeatures = [
@@ -111,7 +117,7 @@ export default function Home() {
             fontWeight: 600,
           }}
         >
-          ⚡ 12 herramientas gratuitas
+          ⚡ 13 herramientas gratuitas
         </div>
         <h1
           style={{

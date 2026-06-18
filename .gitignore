@@ -4,11 +4,10 @@
 /node_modules
 /.pnp
 .pnp.*
-.yarn/*
-!.yarn/patches
-!.yarn/plugins
-!.yarn/releases
-!.yarn/versions
+
+# pnpm
+.pnpm-store/
+pnpm-debug.log*
 
 # testing
 /coverage
@@ -39,3 +38,15 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Cloudflare Pages build output
+.vercel/
+
+# OpenNext build output
+.open-next/
+
+# Cloudflare local secrets
+.dev.vars
+
+# Temp files
+_tmp_*
