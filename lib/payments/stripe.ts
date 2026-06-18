@@ -2,8 +2,18 @@ import Stripe from "stripe";
 import type { PlanId } from "@/lib/plans";
 import { createAdminClient } from "@/lib/supabase/server";
 
-export const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-  apiVersion: "2026-05-27.dahlia",
+// Lazy singleton — not instantiated at module load time (would fail at build)
+let _stripe: Stripe | null = null;
+export function getStripe(): Stripe {
+  if (!_stripe) {
+    if (!process.env.STRIPE_SECRET_KEY) throw new Error("STRIPE_SECRET_KEY not set");
+    _stripe = new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: "2026-05-27.dahlia" });
+  }
+  return _stripe;
+}
+/** @deprecated use getStripe() */
+export const stripe = new Proxy({} as Stripe, {
+  get: (_, prop) => getStripe()[prop as keyof Stripe],
 });
 
 const PRICE_IDS: Record<Exclude<PlanId, "free">, string> = {
