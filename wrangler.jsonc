@@ -1,7 +1,6 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "pixlit",
-  "account_id": "6e8205c2b5f9dc995804249813783339",
   "main": ".open-next/worker.js",
   "compatibility_date": "2025-05-01",
   "compatibility_flags": [
