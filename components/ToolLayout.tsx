@@ -9,11 +9,6 @@ interface ToolLayoutProps {
 export default function ToolLayout({ title, description, children }: ToolLayoutProps) {
   return (
     <div style={{ maxWidth: "900px", margin: "0 auto", padding: "48px 24px" }}>
-      {/* Ad slot top */}
-      <div className="ad-slot" style={{ height: "90px", marginBottom: "32px" }}>
-        📢 AD SLOT — 728×90 Leaderboard
-      </div>
-
       <h1
         style={{
           fontSize: "32px",
@@ -37,11 +32,6 @@ export default function ToolLayout({ title, description, children }: ToolLayoutP
         }}
       >
         {children}
-      </div>
-
-      {/* Ad slot bottom */}
-      <div className="ad-slot" style={{ height: "250px", marginTop: "32px" }}>
-        📢 AD SLOT — 300×250 Rectangle
       </div>
     </div>
   );
