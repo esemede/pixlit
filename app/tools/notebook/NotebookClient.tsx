@@ -7,6 +7,7 @@ import { createClient } from "@/lib/supabase/client";
 import { useNotebook } from "@/lib/useNotebook";
 import type { NotebookTheme } from "@/lib/supabase/types";
 import NotebookToolsPanel, { type PanelTab } from "./NotebookToolsPanel";
+import NotebooksPanel from "./NotebooksPanel";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -423,11 +424,12 @@ function renderStroke(ctx: CanvasRenderingContext2D, s: Stroke) {
 }
 
 // ── Merge canvases ────────────────────────────────────────────────────────────
-function mergeCanvases(main: HTMLCanvasElement, overlay: HTMLCanvasElement) {
+function mergeCanvases(bg: HTMLCanvasElement, main: HTMLCanvasElement, overlay: HTMLCanvasElement) {
   const tmp = document.createElement("canvas");
   tmp.width  = main.width;
   tmp.height = main.height;
   const ctx  = tmp.getContext("2d")!;
+  ctx.drawImage(bg,      0, 0);
   ctx.drawImage(main,    0, 0);
   ctx.drawImage(overlay, 0, 0);
   return tmp;
@@ -461,6 +463,7 @@ function gradientCoords(dir: string, w: number, h: number): [number, number, num
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export default function NotebookClient({ minimal = false }: { minimal?: boolean }) {
+  const bgCanvasRef  = useRef<HTMLCanvasElement>(null);
   const canvasRef    = useRef<HTMLCanvasElement>(null);
   const overlayRef   = useRef<HTMLCanvasElement>(null);
   const wrapperRef   = useRef<HTMLDivElement>(null);
@@ -487,6 +490,8 @@ export default function NotebookClient({ minimal = false }: { minimal?: boolean 
   const [panelOpen,   setPanelOpen]   = useState(false);
   const [panelTab,    setPanelTab]    = useState<PanelTab>("qr");
   const [localSavedAt, setLocalSavedAt] = useState<number | null>(null);
+  const [zoom, setZoom] = useState(1);
+  const [pan,  setPan]  = useState({ x: 0, y: 0 });
 
   const [isRecording,   setIsRecording]   = useState(false);
   const [recordingTime, setRecordingTime] = useState(0);
@@ -498,12 +503,19 @@ export default function NotebookClient({ minimal = false }: { minimal?: boolean 
     notebookId,
     isAuth,
     saveState,
+    notebooks,
+    switchNotebook,
+    createNotebook,
+    renameNotebook,
+    deleteNotebook,
     loadPage: loadPageFromServer,
     savePage: savePageToServer,
     addPage: addPageToServer,
   } = useNotebook({
     onLimitReached: () => { window.location.href = "/pricing?reason=pages"; },
   });
+
+  const [notebooksPanelOpen, setNotebooksPanelOpen] = useState(false);
 
   const themeRef       = useRef(theme);
   const notebookIdRef  = useRef(notebookId);
@@ -535,21 +547,55 @@ export default function NotebookClient({ minimal = false }: { minimal?: boolean 
   useEffect(() => { palmRejectRef.current = palmReject; }, [palmReject]);
   useEffect(() => { pageIdxRef.current    = pageIdx;  }, [pageIdx]);
   useEffect(() => { pagesRef.current      = pages;    }, [pages]);
+  const canvasRatioRef = useRef(canvasRatio);
+  useEffect(() => { canvasRatioRef.current = canvasRatio; }, [canvasRatio]);
 
   const drawing      = useRef(false);
   const curStroke    = useRef<Stroke | null>(null);
   const activePenId  = useRef<number | null>(null);
   const lastPenTime  = useRef(0);
   const rejectedIds  = useRef(new Set<number>());
+  const zoomRef      = useRef(1);
+  const panRef       = useRef({ x: 0, y: 0 });
+  const zoomLayerRef = useRef<HTMLDivElement>(null);
+  const isSpaceRef   = useRef(false);
+  const spacePanRef  = useRef<{ active: boolean; lastX: number; lastY: number }>({ active: false, lastX: 0, lastY: 0 });
+  const pinchRef     = useRef<Map<number, { x: number; y: number }>>(new Map());
+  const prevPinchRef = useRef<{ dist: number; midX: number; midY: number } | null>(null);
+
+  const applyZoomPan = (z: number, p: { x: number; y: number }) => {
+    zoomRef.current = z;
+    panRef.current  = p;
+    if (zoomLayerRef.current) {
+      zoomLayerRef.current.style.transform =
+        `translate(${p.x}px,${p.y}px) scale(${z})`;
+    }
+    setZoom(z);
+    setPan(p);
+  };
 
   // ── Load from localStorage on mount (anonymous users get their work back) ─
   useEffect(() => {
+    if (isAuth) return; // auth users load from server
     const saved = lsLoad();
     if (saved) {
       pagesRef.current = saved;
       setPages([...saved]);
     }
-  }, []);
+  }, [isAuth]);
+
+  // ── Reset pages when switching notebooks (auth users) ─────────────────────
+  const prevNotebookId = useRef<string | null>(null);
+  useEffect(() => {
+    if (!notebookId || notebookId === prevNotebookId.current) return;
+    prevNotebookId.current = notebookId;
+    const blank = [{ strokes: [] }];
+    pagesRef.current = blank;
+    undoStack.current = [[{ strokes: [] }]];
+    setPages([...blank]);
+    setPageIdx(0);
+    pageIdxRef.current = 0;
+  }, [notebookId]);
 
   // ── localStorage auto-save every 60 seconds ────────────────────────────────
   useEffect(() => {
@@ -560,21 +606,76 @@ export default function NotebookClient({ minimal = false }: { minimal?: boolean 
     return () => clearInterval(id);
   }, []);
 
-  // ── Canvas resize ─────────────────────────────────────────────────────────
+  // ── Canvas size + fit zoom: buffer = viewportWidth × DPR for 1:1 sharpness ─
+  const applyFit = () => {
+    const vp = wrapperRef.current;
+    if (!vp) return;
+    const dpr = window.devicePixelRatio || 1;
+    const vpW = vp.offsetWidth;
+    if (vpW <= 0) return;
+    // Buffer is dpr× the CSS viewport width → physical pixel-perfect
+    const bufW = Math.round(vpW * dpr);
+    const bufH = Math.round(vpW * dpr * canvasRatioRef.current);
+    setCanvasSize({ w: bufW, h: bufH });
+    // scale(1/dpr) makes CSS display = vpW, matching the viewport exactly
+    applyZoomPan(1 / dpr, { x: 0, y: 0 });
+  };
+
   useEffect(() => {
-    const obs = new ResizeObserver(() => {
-      if (!wrapperRef.current) return;
-      const { width, height } = wrapperRef.current.getBoundingClientRect();
-      if (width > 0 && height > 0)
-        setCanvasSize({ w: Math.round(width), h: Math.round(height) });
-    });
-    if (wrapperRef.current) obs.observe(wrapperRef.current);
+    const vp = wrapperRef.current;
+    if (!vp) return;
+    const obs = new ResizeObserver(() => applyFit());
+    obs.observe(vp);
+    requestAnimationFrame(() => applyFit());
     return () => obs.disconnect();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ── Redraw ────────────────────────────────────────────────────────────────
-  const redraw = useCallback(() => {
-    const canvas = canvasRef.current;
+  // Refit when canvas ratio changes (user changed paper size)
+  useEffect(() => {
+    requestAnimationFrame(() => applyFit());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canvasRatio]);
+
+  // ── Eraser cursor: circle matching the eraser size on screen ─────────────
+  useEffect(() => {
+    const overlay = overlayRef.current;
+    if (!overlay) return;
+    if (tool !== "eraser") {
+      overlay.style.cursor = "crosshair";
+      return;
+    }
+    const dpr = window.devicePixelRatio || 1;
+    // eraser radius in CSS pixels at current zoom
+    const r = Math.max(2, (lineWidth * 3 * zoom) / 2);
+    const size = Math.ceil(r * 2) + 4; // +4 for border
+    const half = size / 2;
+    const tmp = document.createElement("canvas");
+    tmp.width  = size * dpr;
+    tmp.height = size * dpr;
+    const ctx = tmp.getContext("2d")!;
+    ctx.scale(dpr, dpr);
+    ctx.beginPath();
+    ctx.arc(half, half, r, 0, Math.PI * 2);
+    ctx.strokeStyle = "rgba(255,255,255,0.9)";
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(half, half, r, 0, Math.PI * 2);
+    ctx.strokeStyle = "rgba(0,0,0,0.5)";
+    ctx.lineWidth = 0.5;
+    ctx.stroke();
+    // crosshair dot at center
+    ctx.beginPath();
+    ctx.arc(half, half, 1.2, 0, Math.PI * 2);
+    ctx.fillStyle = "rgba(255,255,255,0.9)";
+    ctx.fill();
+    overlay.style.cursor = `url(${tmp.toDataURL()}) ${half} ${half}, crosshair`;
+  }, [tool, lineWidth, zoom]);
+
+  // ── Background redraw (separate canvas so eraser holes reveal it) ──────────
+  const redrawBg = useCallback(() => {
+    const canvas = bgCanvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
@@ -583,7 +684,6 @@ export default function NotebookClient({ minimal = false }: { minimal?: boolean 
     const t  = themeRef.current;
     const bg = bgGradientRef.current;
 
-    // Background: gradient or solid color
     if (bg) {
       const [x1, y1, x2, y2] = gradientCoords(bg.dir, canvas.width, canvas.height);
       const grad = ctx.createLinearGradient(x1, y1, x2, y2);
@@ -618,6 +718,16 @@ export default function NotebookClient({ minimal = false }: { minimal?: boolean 
     ctx.strokeStyle = t.marginColor;
     ctx.lineWidth = 1;
     ctx.beginPath(); ctx.moveTo(48, 0); ctx.lineTo(48, canvas.height); ctx.stroke();
+  }, []);
+
+  // ── Strokes redraw (transparent bg — destination-out eraser works correctly)
+  const redraw = useCallback(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
 
     const page = pagesRef.current[pageIdxRef.current];
     if (page) {
@@ -632,7 +742,7 @@ export default function NotebookClient({ minimal = false }: { minimal?: boolean 
     }
   }, []);
 
-  useEffect(() => { redraw(); }, [redraw, canvasSize, pageIdx, theme, bgGradient]);
+  useEffect(() => { redrawBg(); redraw(); }, [redrawBg, redraw, canvasSize, pageIdx, theme, bgGradient]);
 
   // ── Load page from server (authenticated) ─────────────────────────────────
   useEffect(() => {
@@ -683,9 +793,13 @@ export default function NotebookClient({ minimal = false }: { minimal?: boolean 
   }, []);
 
   useEffect(() => {
-    const onChange = () => setIsFullscreen(!!document.fullscreenElement);
+    const onChange = () => {
+      setIsFullscreen(!!document.fullscreenElement);
+      requestAnimationFrame(() => applyFit());
+    };
     document.addEventListener("fullscreenchange", onChange);
     return () => document.removeEventListener("fullscreenchange", onChange);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // ── Pointer events ────────────────────────────────────────────────────────
@@ -723,14 +837,39 @@ export default function NotebookClient({ minimal = false }: { minimal?: boolean 
 
     const onDown = (e: PointerEvent) => {
       e.preventDefault();
+      overlay.setPointerCapture(e.pointerId);
+
+      // Track for pinch-to-zoom
+      pinchRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+      // Pinch mode: two or more touch/pen pointers → don't draw
+      if (pinchRef.current.size >= 2) {
+        drawing.current = false;
+        curStroke.current = null;
+        const pts = [...pinchRef.current.values()];
+        const dx = pts[0].x - pts[1].x; const dy = pts[0].y - pts[1].y;
+        prevPinchRef.current = {
+          dist: Math.hypot(dx, dy),
+          midX: (pts[0].x + pts[1].x) / 2,
+          midY: (pts[0].y + pts[1].y) / 2,
+        };
+        return;
+      }
+
       if (e.pointerType === "pen") {
         setTabletDetected(true);
         activePenId.current = e.pointerId;
         lastPenTime.current = Date.now();
       }
+
+      // Space + drag or middle mouse = pan
+      if (isSpaceRef.current || e.button === 1) {
+        spacePanRef.current = { active: true, lastX: e.clientX, lastY: e.clientY };
+        return;
+      }
+
       if (shouldReject(e)) { rejectedIds.current.add(e.pointerId); return; }
 
-      overlay.setPointerCapture(e.pointerId);
       drawing.current   = true;
       curStroke.current = {
         tool:      toolRef.current,
@@ -743,6 +882,40 @@ export default function NotebookClient({ minimal = false }: { minimal?: boolean 
     const onMove = (e: PointerEvent) => {
       e.preventDefault();
       if (e.pointerType === "pen") lastPenTime.current = Date.now();
+
+      // Pinch-to-zoom
+      if (pinchRef.current.size >= 2 && pinchRef.current.has(e.pointerId)) {
+        pinchRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+        const pts = [...pinchRef.current.values()];
+        const dx = pts[0].x - pts[1].x; const dy = pts[0].y - pts[1].y;
+        const newDist = Math.hypot(dx, dy);
+        const midX = (pts[0].x + pts[1].x) / 2;
+        const midY = (pts[0].y + pts[1].y) / 2;
+        if (prevPinchRef.current) {
+          const { dist: prevDist, midX: prevMX, midY: prevMY } = prevPinchRef.current;
+          const rect = wrapperRef.current!.getBoundingClientRect();
+          // Pinch zoom centered on midpoint
+          const vx = midX - rect.left; const vy = midY - rect.top;
+          const factor = newDist / prevDist;
+          const newZ = Math.max(0.1, Math.min(8, zoomRef.current * factor));
+          const newPx = vx - (vx - panRef.current.x) * newZ / zoomRef.current + (midX - prevMX);
+          const newPy = vy - (vy - panRef.current.y) * newZ / zoomRef.current + (midY - prevMY);
+          applyZoomPan(newZ, { x: newPx, y: newPy });
+        }
+        prevPinchRef.current = { dist: newDist, midX, midY };
+        return;
+      }
+
+      // Space-pan
+      if (spacePanRef.current.active) {
+        const dx = e.clientX - spacePanRef.current.lastX;
+        const dy = e.clientY - spacePanRef.current.lastY;
+        spacePanRef.current.lastX = e.clientX;
+        spacePanRef.current.lastY = e.clientY;
+        applyZoomPan(zoomRef.current, { x: panRef.current.x + dx, y: panRef.current.y + dy });
+        return;
+      }
+
       if (rejectedIds.current.has(e.pointerId)) return;
       if (!drawing.current || !curStroke.current) return;
       curStroke.current.points.push(getPos(e));
@@ -751,6 +924,11 @@ export default function NotebookClient({ minimal = false }: { minimal?: boolean 
 
     const onUp = (e: PointerEvent) => {
       e.preventDefault();
+      pinchRef.current.delete(e.pointerId);
+      if (pinchRef.current.size < 2) prevPinchRef.current = null;
+      if (spacePanRef.current.active && pinchRef.current.size === 0) {
+        spacePanRef.current.active = false; return;
+      }
       if (e.pointerType === "pen") { activePenId.current = null; lastPenTime.current = Date.now(); }
       if (rejectedIds.current.has(e.pointerId)) { rejectedIds.current.delete(e.pointerId); return; }
       if (!drawing.current || !curStroke.current) return;
@@ -809,17 +987,55 @@ export default function NotebookClient({ minimal = false }: { minimal?: boolean 
     const onKey = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement) return;
       if ((e.metaKey || e.ctrlKey) && e.key === "z") { e.preventDefault(); handleUndo(); }
+      if ((e.metaKey || e.ctrlKey) && e.key === "s") { e.preventDefault(); saveNow(); }
       if (e.key === "p") setTool("pen");
       if (e.key === "m") setTool("marker");
       if (e.key === "h") setTool("highlighter");
       if (e.key === "e") setTool("eraser");
       if (e.key === "s") setShapeMode(v => !v);
       if (e.key === "f") toggleFullscreen();
+      if (e.key === " " && !(e.target instanceof HTMLTextAreaElement)) { e.preventDefault(); isSpaceRef.current = true; }
+    };
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (e.key === " ") { isSpaceRef.current = false; spacePanRef.current.active = false; }
     };
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    window.addEventListener("keyup",   onKeyUp);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("keyup",   onKeyUp);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [toggleFullscreen]);
+
+  // ── Ctrl+Wheel zoom ───────────────────────────────────────────────────────
+  useEffect(() => {
+    const el = wrapperRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      if (e.ctrlKey || e.metaKey) {
+        // Zoom centered on cursor
+        const rect = el.getBoundingClientRect();
+        const vx = e.clientX - rect.left;
+        const vy = e.clientY - rect.top;
+        const factor = e.deltaY < 0 ? 1.1 : 1 / 1.1;
+        const newZ = Math.max(0.1, Math.min(8, zoomRef.current * factor));
+        const newPx = vx - (vx - panRef.current.x) * newZ / zoomRef.current;
+        const newPy = vy - (vy - panRef.current.y) * newZ / zoomRef.current;
+        applyZoomPan(newZ, { x: newPx, y: newPy });
+      } else {
+        // Pan (trackpad two-finger swipe or plain scroll)
+        applyZoomPan(zoomRef.current, {
+          x: panRef.current.x - e.deltaX,
+          y: panRef.current.y - e.deltaY,
+        });
+      }
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // ── Actions ───────────────────────────────────────────────────────────────
   const handleUndo = useCallback(() => {
@@ -877,10 +1093,29 @@ export default function NotebookClient({ minimal = false }: { minimal?: boolean 
     }
   }, [isAuth, redraw]);
 
+  const [saving, setSaving] = useState(false);
+  const saveNow = useCallback(async () => {
+    lsSave(pagesRef.current);
+    setLocalSavedAt(Date.now());
+    if (!isAuth || !notebookIdRef.current) return;
+    setSaving(true);
+    try {
+      await Promise.all(pagesRef.current.map((page, i) =>
+        fetch(`/api/notebooks/${notebookIdRef.current}/pages/${i + 1}`, {
+          method:  "PUT",
+          headers: { "Content-Type": "application/json" },
+          body:    JSON.stringify({ strokes: page.strokes }),
+        })
+      ));
+    } finally {
+      setSaving(false);
+    }
+  }, [isAuth]);
+
   const exportPNG = useCallback(() => {
-    const main = canvasRef.current, ov = overlayRef.current;
-    if (!main || !ov) return;
-    const tmp = mergeCanvases(main, ov);
+    const bg = bgCanvasRef.current, main = canvasRef.current, ov = overlayRef.current;
+    if (!bg || !main || !ov) return;
+    const tmp = mergeCanvases(bg, main, ov);
     const a   = document.createElement("a");
     a.download = `pixlit-notebook-p${pageIdxRef.current + 1}.png`;
     a.href = tmp.toDataURL("image/png");
@@ -888,9 +1123,9 @@ export default function NotebookClient({ minimal = false }: { minimal?: boolean 
   }, []);
 
   const exportPDF = useCallback(() => {
-    const main = canvasRef.current, ov = overlayRef.current;
-    if (!main || !ov) return;
-    const dataUrl = mergeCanvases(main, ov).toDataURL("image/png");
+    const bg = bgCanvasRef.current, main = canvasRef.current, ov = overlayRef.current;
+    if (!bg || !main || !ov) return;
+    const dataUrl = mergeCanvases(bg, main, ov).toDataURL("image/png");
     const win = window.open("", "_blank");
     if (!win) { alert("Permite ventanas emergentes para exportar PDF."); return; }
     win.document.write(`<!DOCTYPE html>
@@ -1132,6 +1367,32 @@ export default function NotebookClient({ minimal = false }: { minimal?: boolean 
         <span style={{ fontSize: "11px", color: "#22c55e" }}>✒️ Tablet</span>
       )}
 
+      {/* Zoom controls */}
+      <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+        <button onClick={() => applyZoomPan(Math.max(0.1, zoomRef.current / 1.2), panRef.current)}
+          style={{ ...btnTool(false), padding: "3px 8px", fontSize: 14 }}>−</button>
+        <input
+          type="text"
+          defaultValue={`${Math.round(zoom * 100)}%`}
+          key={Math.round(zoom * 100)}
+          onFocus={e => e.target.select()}
+          onBlur={e => {
+            const val = parseInt(e.target.value.replace("%", ""), 10);
+            if (!isNaN(val) && val > 0) applyZoomPan(Math.max(0.1, Math.min(800, val)) / 100, panRef.current);
+            else applyFit();
+          }}
+          onKeyDown={e => {
+            if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+            if (e.key === "Escape") applyFit();
+          }}
+          style={{ background: "none", border: "1px solid #333", borderRadius: 6,
+            color: "#aaa", fontSize: 11, padding: "3px 7px", width: 52,
+            textAlign: "center", outline: "none" }}
+        />
+        <button onClick={() => applyZoomPan(Math.min(8, zoomRef.current * 1.2), panRef.current)}
+          style={{ ...btnTool(false), padding: "3px 8px", fontSize: 14 }}>+</button>
+      </div>
+
       <div style={{ flex: 1 }} />
 
       {/* Actions */}
@@ -1170,24 +1431,39 @@ export default function NotebookClient({ minimal = false }: { minimal?: boolean 
         </button>
       )}
 
-      {/* Save indicators */}
-      {isAuth && (
-        <span style={{
-          fontSize: 11, color:
-            saveState.status === "saving" ? "#888" :
-            saveState.status === "saved"  ? "#22c55e" :
-            saveState.status === "error"  ? "#ef4444" : "transparent",
-        }}>
-          {saveState.status === "saving" ? "⏳ Guardando…"
-          : saveState.status === "saved"  ? "✓ Guardado"
-          : saveState.status === "error"  ? "⚠ Error"
-          : ""}
-        </span>
-      )}
+      {/* Save button */}
+      <button
+        onClick={saveNow}
+        disabled={saving || saveState.status === "saving"}
+        style={{
+          ...btnTool(false),
+          fontSize: "12px", padding: "5px 10px",
+          opacity: saving || saveState.status === "saving" ? 0.5 : 1,
+          color: saving || saveState.status === "saving" ? "#888"
+               : saveState.status === "saved" ? "#22c55e"
+               : saveState.status === "error" ? "#ef4444"
+               : "#aaa",
+        }}
+        title={isAuth ? "Guardar en servidor (Ctrl+S)" : "Guardar localmente (Ctrl+S)"}
+      >
+        {saving || saveState.status === "saving" ? "⏳ Guardando…"
+         : saveState.status === "saved"  ? "✓ Guardado"
+         : saveState.status === "error"  ? "⚠ Error al guardar"
+         : "💾 Guardar"}
+      </button>
       {!isAuth && localSavedAt && (
         <span style={{ fontSize: 10, color: "#555" }} title={`Guardado local: ${new Date(localSavedAt).toLocaleTimeString()}`}>
-          💾 local
+          local
         </span>
+      )}
+
+      {/* Notebooks manager */}
+      {isAuth && (
+        <button onClick={() => setNotebooksPanelOpen(true)} style={{
+          ...btnTool(false), fontSize: "12px", padding: "5px 10px",
+        }} title="Mis cuadernos">
+          📚 Cuadernos
+        </button>
       )}
 
       {/* Auth gate */}
@@ -1317,23 +1593,19 @@ export default function NotebookClient({ minimal = false }: { minimal?: boolean 
           </div>
         )}
 
-        {/* Canvas wrapper — aspect ratio applied in all non-fullscreen modes */}
+        {/* Canvas viewport — fills all available width, fixed height, clips overflow */}
         <div
           ref={wrapperRef}
           style={isFullscreen ? {
-            // Fullscreen: fill all space, let the drawing area use all pixels
             position: "relative",
             flex: 1, width: "100%", minHeight: 0,
             overflow: "hidden",
             touchAction: "none", userSelect: "none",
             WebkitUserSelect: "none",
           } : {
-            // Normal & minimal: respect chosen aspect ratio, centered, capped by viewport
             position: "relative",
             width: "100%",
-            maxWidth: 900,
-            aspectRatio: `${1 / canvasRatio}`,
-            maxHeight: "calc(100vh - 64px - 160px)",
+            height: "calc(100vh - 64px - 160px)",
             borderRadius: 10,
             overflow: "hidden",
             border: "1px solid #2a2a2a",
@@ -1342,29 +1614,39 @@ export default function NotebookClient({ minimal = false }: { minimal?: boolean 
             WebkitUserSelect: "none",
           }}
         >
-          <canvas ref={canvasRef} width={canvasSize.w} height={canvasSize.h}
-            style={{ position: "absolute", inset: 0, width: "100%", height: "100%" }} />
-          <canvas ref={overlayRef} width={canvasSize.w} height={canvasSize.h}
-            style={{
-              position: "absolute", inset: 0, width: "100%", height: "100%",
-              cursor: tool === "eraser" ? "cell" : "crosshair",
-            }} />
-          {shapeMode && (
-            <div style={{
-              position: "absolute", top: 10, right: 10,
-              background: "rgba(139,92,246,0.85)", borderRadius: 6,
-              padding: "3px 10px", fontSize: 11, color: "white", fontWeight: 700,
-              pointerEvents: "none",
-            }}>⬡ Figuras activo</div>
-          )}
-          {realtimeRef.current && (
-            <div style={{
-              position: "absolute", top: 10, left: 10,
-              background: "rgba(34,197,94,0.2)", border: "1px solid rgba(34,197,94,0.4)",
-              borderRadius: 6, padding: "3px 10px", fontSize: 10, color: "#86efac",
-              pointerEvents: "none",
-            }}>● En vivo</div>
-          )}
+          {/* Zoom layer — natural document size, CSS transform for zoom/pan */}
+          <div ref={zoomLayerRef} style={{
+            position: "absolute", top: 0, left: 0,
+            width: canvasSize.w, height: canvasSize.h,
+            transform: `translate(${pan.x}px,${pan.y}px) scale(${zoom})`,
+            transformOrigin: "0 0",
+          }}>
+            <canvas ref={bgCanvasRef} width={canvasSize.w} height={canvasSize.h}
+              style={{ position: "absolute", inset: 0, width: "100%", height: "100%" }} />
+            <canvas ref={canvasRef} width={canvasSize.w} height={canvasSize.h}
+              style={{ position: "absolute", inset: 0, width: "100%", height: "100%" }} />
+            <canvas ref={overlayRef} width={canvasSize.w} height={canvasSize.h}
+              style={{
+                position: "absolute", inset: 0, width: "100%", height: "100%",
+                cursor: isSpaceRef.current ? "grab" : "crosshair",
+              }} />
+            {shapeMode && (
+              <div style={{
+                position: "absolute", top: 10, right: 10,
+                background: "rgba(139,92,246,0.85)", borderRadius: 6,
+                padding: "3px 10px", fontSize: 11, color: "white", fontWeight: 700,
+                pointerEvents: "none",
+              }}>⬡ Figuras activo</div>
+            )}
+            {realtimeRef.current && (
+              <div style={{
+                position: "absolute", top: 10, left: 10,
+                background: "rgba(34,197,94,0.2)", border: "1px solid rgba(34,197,94,0.4)",
+                borderRadius: 6, padding: "3px 10px", fontSize: 10, color: "#86efac",
+                pointerEvents: "none",
+              }}>● En vivo</div>
+            )}
+          </div>
         </div>
 
         {/* Tools panel (QR / Color / Gradient) */}
@@ -1380,6 +1662,18 @@ export default function NotebookClient({ minimal = false }: { minimal?: boolean 
           onSetDrawColor={setColor}
         />
       </div>
+
+      {/* Notebooks manager modal */}
+      <NotebooksPanel
+        isOpen={notebooksPanelOpen}
+        notebooks={notebooks}
+        activeId={notebookId}
+        onClose={() => setNotebooksPanelOpen(false)}
+        onSwitch={id => { switchNotebook(id); setNotebooksPanelOpen(false); }}
+        onCreate={createNotebook}
+        onRename={renameNotebook}
+        onDelete={deleteNotebook}
+      />
 
       {/* Footer hints — only in non-minimal, non-fullscreen mode */}
       {!minimal && !isFullscreen && (

@@ -211,9 +211,11 @@ export default function NotebookToolsPanel({
             { id: "color",    label: "🎨 Colores"  },
             { id: "gradient", label: "🌈 Gradiente"},
           ] as { id: PanelTab; label: string }[]).map(tab => (
-            <button key={tab.id} onClick={() => onTabChange(tab.id)} style={{
+            <button key={tab.id} onPointerDown={e => e.stopPropagation()} onClick={() => onTabChange(tab.id)} style={{
               background:   activeTab === tab.id ? "rgba(139,92,246,0.25)" : "none",
-              border:       activeTab === tab.id ? "1px solid rgba(139,92,246,0.6)" : "1px solid transparent",
+              borderTop:    activeTab === tab.id ? "1px solid rgba(139,92,246,0.6)" : "1px solid transparent",
+              borderRight:  activeTab === tab.id ? "1px solid rgba(139,92,246,0.6)" : "1px solid transparent",
+              borderLeft:   activeTab === tab.id ? "1px solid rgba(139,92,246,0.6)" : "1px solid transparent",
               borderBottom: "none",
               borderRadius: "7px 7px 0 0",
               color:        activeTab === tab.id ? "#c4b5fd" : "#666",

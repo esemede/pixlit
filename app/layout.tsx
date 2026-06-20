@@ -6,6 +6,12 @@ import Footer from "@/components/Footer";
 export const metadata: Metadata = {
   title: "Pixlit - Herramientas Online Gratis",
   description: "Suite de herramientas online gratuitas: generador QR, compresor de imágenes, formateador JSON, generador de contraseñas y más.",
+  icons: {
+    icon: [
+      { url: "/icon.svg", type: "image/svg+xml" },
+      { url: "/favicon.ico",  type: "image/x-icon" },
+    ],
+  },
 };
 
 export default function RootLayout({
