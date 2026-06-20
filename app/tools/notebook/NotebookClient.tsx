@@ -6,10 +6,11 @@ import type { RealtimeChannel } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/client";
 import { useNotebook } from "@/lib/useNotebook";
 import type { NotebookTheme } from "@/lib/supabase/types";
+import NotebookToolsPanel, { type PanelTab } from "./NotebookToolsPanel";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-type DrawTool = "pen" | "marker" | "eraser" | "highlighter";
+type DrawTool = "pen" | "marker" | "eraser" | "highlighter" | "image";
 type ShapeHint =
   | "line" | "arrow"
   | "circle"
@@ -23,16 +24,24 @@ type ShapeHint =
 interface Point { x: number; y: number; pressure: number }
 
 interface Stroke {
-  tool:        DrawTool;
-  color:       string;
-  lineWidth:   number;
-  points:      Point[];
-  shape?:      ShapeHint;
-  shapeData?:  Record<string, number>;
-  cornerPts?:  { x: number; y: number }[];
+  tool:          DrawTool;
+  color:         string;
+  lineWidth:     number;
+  points:        Point[];
+  shape?:        ShapeHint;
+  shapeData?:    Record<string, number>;
+  cornerPts?:    { x: number; y: number }[];
+  // Image stroke fields
+  imageDataUrl?: string;
+  imgX?:         number;
+  imgY?:         number;
+  imgW?:         number;
+  imgH?:         number;
 }
 
 interface Page { strokes: Stroke[] }
+
+interface BgGradient { c1: string; c2: string; dir: string }
 
 // ── LocalStorage ───────────────────────────────────────────────────────────────
 
@@ -426,6 +435,29 @@ function mergeCanvases(main: HTMLCanvasElement, overlay: HTMLCanvasElement) {
 
 const LETTER_RATIO = 11 / 8.5;
 
+const CANVAS_PRESETS = [
+  { label: "Carta",      ratio: 11 / 8.5  },
+  { label: "A4",         ratio: 297 / 210 },
+  { label: "A5",         ratio: 210 / 148 },
+  { label: "Cuadrado",   ratio: 1         },
+  { label: "Horizontal", ratio: 8.5 / 11  },
+  { label: "16:9",       ratio: 9 / 16    },
+];
+
+function gradientCoords(dir: string, w: number, h: number): [number, number, number, number] {
+  switch (dir) {
+    case "to right":       return [0, 0, w, 0];
+    case "to left":        return [w, 0, 0, 0];
+    case "to bottom":      return [0, 0, 0, h];
+    case "to top":         return [0, h, 0, 0];
+    case "to top right":   return [0, h, w, 0];
+    case "to bottom left": return [w, 0, 0, h];
+    case "135deg":         return [0, 0, w, h];
+    case "45deg":          return [w, h, 0, 0];
+    default:               return [0, 0, w, 0];
+  }
+}
+
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export default function NotebookClient({ minimal = false }: { minimal?: boolean }) {
@@ -434,6 +466,7 @@ export default function NotebookClient({ minimal = false }: { minimal?: boolean 
   const wrapperRef   = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const realtimeRef  = useRef<RealtimeChannel | null>(null);
+  const imageCacheRef = useRef<Map<string, HTMLImageElement>>(new Map());
 
   const [pages, setPages]           = useState<Page[]>([{ strokes: [] }]);
   const [pageIdx, setPageIdx]       = useState(0);
@@ -449,6 +482,10 @@ export default function NotebookClient({ minimal = false }: { minimal?: boolean 
     background: "ruled", bgColor: "#1e1e2e",
     lineColor: "rgba(255,255,255,0.035)", marginColor: "rgba(139,92,246,0.08)",
   });
+  const [bgGradient,  setBgGradient]  = useState<BgGradient | null>(null);
+  const [canvasRatio, setCanvasRatio] = useState(LETTER_RATIO);
+  const [panelOpen,   setPanelOpen]   = useState(false);
+  const [panelTab,    setPanelTab]    = useState<PanelTab>("qr");
   const [localSavedAt, setLocalSavedAt] = useState<number | null>(null);
 
   const [isRecording,   setIsRecording]   = useState(false);
@@ -468,10 +505,12 @@ export default function NotebookClient({ minimal = false }: { minimal?: boolean 
     onLimitReached: () => { window.location.href = "/pricing?reason=pages"; },
   });
 
-  const themeRef    = useRef(theme);
-  const notebookIdRef = useRef(notebookId);
-  useEffect(() => { themeRef.current    = theme;      }, [theme]);
+  const themeRef       = useRef(theme);
+  const notebookIdRef  = useRef(notebookId);
+  const bgGradientRef  = useRef(bgGradient);
+  useEffect(() => { themeRef.current      = theme;      }, [theme]);
   useEffect(() => { notebookIdRef.current = notebookId; }, [notebookId]);
+  useEffect(() => { bgGradientRef.current = bgGradient; }, [bgGradient]);
 
   // ── Load theme from profile ───────────────────────────────────────────────
   useEffect(() => {
@@ -541,8 +580,19 @@ export default function NotebookClient({ minimal = false }: { minimal?: boolean 
     if (!ctx) return;
 
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-    const t = themeRef.current;
-    ctx.fillStyle = t.bgColor;
+    const t  = themeRef.current;
+    const bg = bgGradientRef.current;
+
+    // Background: gradient or solid color
+    if (bg) {
+      const [x1, y1, x2, y2] = gradientCoords(bg.dir, canvas.width, canvas.height);
+      const grad = ctx.createLinearGradient(x1, y1, x2, y2);
+      grad.addColorStop(0, bg.c1);
+      grad.addColorStop(1, bg.c2);
+      ctx.fillStyle = grad;
+    } else {
+      ctx.fillStyle = t.bgColor;
+    }
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
     ctx.strokeStyle = t.lineColor;
@@ -570,10 +620,19 @@ export default function NotebookClient({ minimal = false }: { minimal?: boolean 
     ctx.beginPath(); ctx.moveTo(48, 0); ctx.lineTo(48, canvas.height); ctx.stroke();
 
     const page = pagesRef.current[pageIdxRef.current];
-    if (page) page.strokes.forEach(s => renderStroke(ctx, s));
+    if (page) {
+      page.strokes.forEach(s => {
+        if (s.tool === "image" && s.imageDataUrl) {
+          const img = imageCacheRef.current.get(s.imageDataUrl);
+          if (img) ctx.drawImage(img, s.imgX ?? 0, s.imgY ?? 0, s.imgW ?? 256, s.imgH ?? 256);
+        } else {
+          renderStroke(ctx, s);
+        }
+      });
+    }
   }, []);
 
-  useEffect(() => { redraw(); }, [redraw, canvasSize, pageIdx, theme]);
+  useEffect(() => { redraw(); }, [redraw, canvasSize, pageIdx, theme, bgGradient]);
 
   // ── Load page from server (authenticated) ─────────────────────────────────
   useEffect(() => {
@@ -869,6 +928,49 @@ export default function NotebookClient({ minimal = false }: { minimal?: boolean 
     URL.revokeObjectURL(a.href);
   }, []);
 
+  // ── Insert image (QR or any raster) onto canvas ──────────────────────────
+  const insertImage = useCallback((dataUrl: string, displaySize: number) => {
+    const img = new Image();
+    img.onload = () => {
+      imageCacheRef.current.set(dataUrl, img);
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      // Place centered on the visible canvas
+      const scale = displaySize / Math.max(img.width, 1);
+      const w = img.width  * scale;
+      const h = img.height * scale;
+      const x = (canvas.width  - w) / 2;
+      const y = (canvas.height - h) / 2;
+      const imageStroke: Stroke = {
+        tool: "image", color: "#000000", lineWidth: 1, points: [],
+        imageDataUrl: dataUrl, imgX: x, imgY: y, imgW: w, imgH: h,
+      };
+      const idx  = pageIdxRef.current;
+      const next = pagesRef.current.map((p, i) =>
+        i === idx ? { strokes: [...p.strokes, imageStroke] } : p
+      );
+      pagesRef.current = next;
+      undoStack.current[idx] = [...(undoStack.current[idx] ?? []), { strokes: [...next[idx].strokes] }];
+      setPages([...next]);
+      setTimeout(redraw, 0);
+      savePageToServer(idx + 1, next[idx].strokes as unknown[]);
+    };
+    img.src = dataUrl;
+  }, [redraw, savePageToServer]);
+
+  const handleSetBgColor = useCallback((c: string) => {
+    setBgGradient(null);
+    setTheme(t => ({ ...t, bgColor: c }));
+  }, []);
+
+  const handleSetBgGradient = useCallback((c1: string, c2: string, dir: string) => {
+    setBgGradient({ c1, c2, dir });
+  }, []);
+
+  const handleClearGradient = useCallback(() => {
+    setBgGradient(null);
+  }, []);
+
   // ── Voice recording ───────────────────────────────────────────────────────
   const startRecording = useCallback(async () => {
     if (!isAuth) { window.location.href = "/auth/login?next=/tools/notebook"; return; }
@@ -997,6 +1099,21 @@ export default function NotebookClient({ minimal = false }: { minimal?: boolean 
         {THEMES.map((t, i) => <option key={i} value={i}>{t.label}</option>)}
       </select>
 
+      {/* Canvas size presets */}
+      <select
+        value={CANVAS_PRESETS.findIndex(p => Math.abs(p.ratio - canvasRatio) < 0.01)}
+        onChange={e => {
+          const idx = Number(e.target.value);
+          if (idx >= 0) setCanvasRatio(CANVAS_PRESETS[idx].ratio);
+        }}
+        style={{
+          background: "#1a1a1a", border: "1px solid #333", borderRadius: 8,
+          color: "#aaa", fontSize: 12, padding: "5px 8px", cursor: "pointer",
+        }}
+      >
+        {CANVAS_PRESETS.map((p, i) => <option key={i} value={i}>📄 {p.label}</option>)}
+      </select>
+
       {tabletDetected && (
         <span style={{ fontSize: "11px", color: "#22c55e" }}>✒️ Tablet</span>
       )}
@@ -1016,6 +1133,13 @@ export default function NotebookClient({ minimal = false }: { minimal?: boolean 
         style={{ fontSize: "12px", padding: "5px 10px" }}>🤖 JSON</button>
       <button onClick={toggleFullscreen} style={{ ...btnTool(isFullscreen), fontSize: "14px", padding: "5px 10px" }} title="f">
         {isFullscreen ? "⛶ Salir" : "⛶ Pantalla completa"}
+      </button>
+
+      {/* Tools panel toggle */}
+      <button onClick={() => setPanelOpen(v => !v)} style={{
+        ...btnTool(panelOpen), fontSize: "14px", padding: "5px 12px",
+      }} title="QR, Colores, Gradientes">
+        🛠️
       </button>
 
       {/* Voice recorder */}
@@ -1182,7 +1306,7 @@ export default function NotebookClient({ minimal = false }: { minimal?: boolean 
             position: "relative",
             width: "100%",
             maxWidth: 900,
-            aspectRatio: `${1 / LETTER_RATIO}`,
+            aspectRatio: `${1 / canvasRatio}`,
             borderRadius: 10,
             overflow: "hidden",
             border: "1px solid #2a2a2a",
@@ -1215,6 +1339,19 @@ export default function NotebookClient({ minimal = false }: { minimal?: boolean 
             }}>● En vivo</div>
           )}
         </div>
+
+        {/* Tools panel (QR / Color / Gradient) */}
+        <NotebookToolsPanel
+          isOpen={panelOpen}
+          activeTab={panelTab}
+          onClose={() => setPanelOpen(false)}
+          onTabChange={setPanelTab}
+          onInsertImage={insertImage}
+          onSetBgColor={handleSetBgColor}
+          onSetBgGradient={handleSetBgGradient}
+          onClearGradient={handleClearGradient}
+          onSetDrawColor={setColor}
+        />
       </div>
 
       {/* Footer hints — only in non-minimal, non-fullscreen mode */}
@@ -1223,11 +1360,11 @@ export default function NotebookClient({ minimal = false }: { minimal?: boolean 
           maxWidth: 900, margin: "12px auto 40px", padding: "0 24px",
           display: "flex", gap: 16, flexWrap: "wrap", color: "#555", fontSize: 11,
         }}>
-          <span>📄 Tamaño carta (8.5×11")</span>
-          <span>✒️ Stylus: presión + anti-palma</span>
-          <span>⬡ Activa "Figuras" para reconocimiento</span>
-          <span>🤖 "JSON" exporta para agentes IA</span>
-          <span>⌨️ p·m·h·e · s figuras · f fullscreen · Ctrl+Z</span>
+          <span>✒️ Stylus + anti-palma</span>
+          <span>⬡ Modo Figuras activo con "s"</span>
+          <span>🛠️ QR · Colores · Gradientes</span>
+          <span>🤖 JSON para agentes IA</span>
+          <span>⌨️ p·m·h·e · s · f · Ctrl+Z</span>
         </div>
       )}
     </div>

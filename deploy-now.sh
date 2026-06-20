@@ -1,19 +1,33 @@
 #!/usr/bin/env bash
 # ──────────────────────────────────────────────────────────────────────
 # deploy-now.sh — Build + Deploy Pixlit a Cloudflare Workers
-# Requiere: .env con CF_TKN, CF_ID y demás vars configuradas.
-# Ejecutar desde el directorio raíz del proyecto: bash deploy-now.sh
+# Requiere estas variables de entorno antes de correr:
+#
+#   export CLOUDFLARE_API_TOKEN="cfat_..."
+#   export CLOUDFLARE_ACCOUNT_ID="6e82..."
+#   export SUPABASE_SERVICE_ROLE_KEY="sb_secret_..."
+#   export PP_CLIID="BAAP..."
+#   export PP_SCRT="EOT0..."
+#   export PAYPAL_PLAN_STARTER="P-..."
+#   export PAYPAL_WEBHOOK_ID="..."
+#
+# O bien crea un archivo .env.deploy (nunca lo subas al repo) y cópialo aquí.
 # ──────────────────────────────────────────────────────────────────────
 set -euo pipefail
 
-if [ -f .env ]; then
-  set -a; source .env; set +a
-else
-  echo "❌ No existe .env — copia .env.example y rellena los valores"
-  exit 1
-fi
+: "${CLOUDFLARE_API_TOKEN:?Falta CLOUDFLARE_API_TOKEN}"
+: "${CLOUDFLARE_ACCOUNT_ID:?Falta CLOUDFLARE_ACCOUNT_ID}"
+: "${SUPABASE_SERVICE_ROLE_KEY:?Falta SUPABASE_SERVICE_ROLE_KEY}"
 
+CF_TKN="$CLOUDFLARE_API_TOKEN"
+CF_ID="$CLOUDFLARE_ACCOUNT_ID"
 WORKER="pixlit"
+
+NEXT_PUBLIC_SUPABASE_URL="${NEXT_PUBLIC_SUPABASE_URL:-https://pureahggaxvrtfrgllzr.supabase.co}"
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY="${NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY:-sb_publishable_htXeHJ8T6Pezu_4yEHFNXw_OT4YMs-j}"
+NEXT_PUBLIC_APP_URL="${NEXT_PUBLIC_APP_URL:-https://pixlit.site}"
+PP_CLIENT_ID="${PP_CLIID:-}"
+PP_SECRET="${PP_SCRT:-}"
 
 echo "▶ 1/4  Instalando dependencias..."
 pnpm install
@@ -22,8 +36,8 @@ echo ""
 echo "▶ 2/4  Build para Cloudflare Workers..."
 NEXT_PUBLIC_SUPABASE_URL="$NEXT_PUBLIC_SUPABASE_URL" \
 NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY="$NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY" \
-NEXT_PUBLIC_APP_URL="https://pixlit.site" \
-NEXT_PUBLIC_PAYPAL_CLIENT_ID="$PP_CLIID" \
+NEXT_PUBLIC_APP_URL="$NEXT_PUBLIC_APP_URL" \
+NEXT_PUBLIC_PAYPAL_CLIENT_ID="$PP_CLIENT_ID" \
 NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY="${NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY:-pk_live_placeholder}" \
 npx opennextjs-cloudflare build
 
@@ -44,12 +58,12 @@ push_secret() {
 
 push_secret "NEXT_PUBLIC_SUPABASE_URL"              "$NEXT_PUBLIC_SUPABASE_URL"
 push_secret "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY"  "$NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY"
-push_secret "SUPABASE_SERVICE_ROLE_KEY"             "$SB_SK"
-push_secret "NEXT_PUBLIC_APP_URL"                   "https://pixlit.site"
-push_secret "PP_CLIID"                              "$PP_CLIID"
-push_secret "PP_SCRT"                               "$PP_SCRT"
-push_secret "NEXT_PUBLIC_PAYPAL_CLIENT_ID"          "$PP_CLIID"
-push_secret "PAYPAL_PLAN_STARTER"                   "$PAYPAL_PLAN_STARTER"
+push_secret "SUPABASE_SERVICE_ROLE_KEY"             "$SUPABASE_SERVICE_ROLE_KEY"
+push_secret "NEXT_PUBLIC_APP_URL"                   "$NEXT_PUBLIC_APP_URL"
+push_secret "PP_CLIID"                              "$PP_CLIENT_ID"
+push_secret "PP_SCRT"                               "$PP_SECRET"
+push_secret "NEXT_PUBLIC_PAYPAL_CLIENT_ID"          "$PP_CLIENT_ID"
+push_secret "PAYPAL_PLAN_STARTER"                   "${PAYPAL_PLAN_STARTER:-}"
 push_secret "PAYPAL_MODE"                           "live"
 push_secret "PAYPAL_WEBHOOK_ID"                     "${PAYPAL_WEBHOOK_ID:-PENDIENTE}"
 
