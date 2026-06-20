@@ -57,20 +57,41 @@ export async function PUT(request: Request, { params }: Params) {
   return NextResponse.json({ saved: true, id: data.id, updated_at: data.updated_at });
 }
 
-/** DELETE /api/notebooks/:id/pages/:num — clear strokes (keep page) */
+/** DELETE /api/notebooks/:id/pages/:num — delete page and renumber subsequent pages */
 export async function DELETE(_req: Request, { params }: Params) {
   const { id, num } = await params;
+  const pageNum = Number(num);
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const { error } = await supabase
+  // Delete the target page
+  const { error: delErr } = await supabase
     .from("notebook_pages")
-    .update({ strokes: [] })
+    .delete()
     .eq("notebook_id", id)
-    .eq("user_id", user.id)
-    .eq("page_number", Number(num));
+    .eq("user_id",     user.id)
+    .eq("page_number", pageNum);
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ cleared: true });
+  if (delErr) return NextResponse.json({ error: delErr.message }, { status: 500 });
+
+  // Shift page_number for all pages after the deleted one
+  const { data: later } = await supabase
+    .from("notebook_pages")
+    .select("id, page_number")
+    .eq("notebook_id", id)
+    .eq("user_id",     user.id)
+    .gt("page_number", pageNum)
+    .order("page_number", { ascending: true });
+
+  if (later && later.length > 0) {
+    for (const p of later) {
+      await supabase
+        .from("notebook_pages")
+        .update({ page_number: p.page_number - 1 })
+        .eq("id", p.id);
+    }
+  }
+
+  return NextResponse.json({ deleted: true });
 }

@@ -863,6 +863,20 @@ export default function NotebookClient({ minimal = false }: { minimal?: boolean 
     setPageIdx(next.length - 1);
   }, [isAuth, addPageToServer]);
 
+  const deletePage = useCallback(async (idx: number) => {
+    if (pagesRef.current.length <= 1) return;
+    const next = pagesRef.current.filter((_, i) => i !== idx);
+    pagesRef.current = next;
+    undoStack.current = undoStack.current.filter((_, i) => i !== idx);
+    const newIdx = Math.min(pageIdxRef.current, next.length - 1);
+    setPages([...next]);
+    setPageIdx(newIdx);
+    setTimeout(redraw, 0);
+    if (isAuth && notebookIdRef.current) {
+      await fetch(`/api/notebooks/${notebookIdRef.current}/pages/${idx + 1}`, { method: "DELETE" });
+    }
+  }, [isAuth, redraw]);
+
   const exportPNG = useCallback(() => {
     const main = canvasRef.current, ov = overlayRef.current;
     if (!main || !ov) return;
@@ -1191,13 +1205,32 @@ export default function NotebookClient({ minimal = false }: { minimal?: boolean 
   const pagesBarJSX = (
     <div style={{ display: "flex", gap: "5px", alignItems: "center", padding: "0 0 8px" }}>
       {pages.map((_, i) => (
-        <button key={i} onClick={() => setPageIdx(i)} style={{
-          background:   pageIdx === i ? "#8b5cf6" : "rgba(255,255,255,0.06)",
-          border:       pageIdx === i ? "1px solid #8b5cf6" : "1px solid #333",
-          borderRadius: "6px", padding: "3px 12px",
-          color: "white", cursor: "pointer", fontSize: "12px",
-          fontWeight: pageIdx === i ? 700 : 400,
-        }}>{i + 1}</button>
+        <div key={i} style={{ display: "flex", alignItems: "stretch" }}>
+          <button onClick={() => setPageIdx(i)} style={{
+            background:   pageIdx === i ? "#8b5cf6" : "rgba(255,255,255,0.06)",
+            border:       pageIdx === i ? "1px solid #8b5cf6" : "1px solid #333",
+            borderRadius: pages.length > 1 ? "6px 0 0 6px" : "6px",
+            borderRight:  pages.length > 1 ? "none" : undefined,
+            padding: "3px 10px",
+            color: "white", cursor: "pointer", fontSize: "12px",
+            fontWeight: pageIdx === i ? 700 : 400,
+          }}>{i + 1}</button>
+          {pages.length > 1 && (
+            <button
+              onClick={() => deletePage(i)}
+              title="Eliminar página"
+              style={{
+                background:   pageIdx === i ? "#8b5cf6" : "rgba(255,255,255,0.06)",
+                border:       pageIdx === i ? "1px solid #8b5cf6" : "1px solid #333",
+                borderLeft:   "1px solid rgba(255,255,255,0.12)",
+                borderRadius: "0 6px 6px 0",
+                padding: "3px 6px",
+                color: pageIdx === i ? "rgba(255,255,255,0.7)" : "#555",
+                cursor: "pointer", fontSize: "11px", lineHeight: 1,
+              }}
+            >×</button>
+          )}
+        </div>
       ))}
       <button onClick={addPage} style={{
         background: "rgba(255,255,255,0.03)", border: "1px dashed #444",
@@ -1259,13 +1292,16 @@ export default function NotebookClient({ minimal = false }: { minimal?: boolean 
           display: "flex",
           flexDirection: "column",
           alignItems: "center",
+          justifyContent: "center",
           padding: "12px 24px",
           minHeight: 0,
+          position: "relative",
         } : {
           padding: "24px",
           display: "flex",
           flexDirection: "column",
           alignItems: "center",
+          position: "relative",
         }}
       >
         {/* Toolbar inside fullscreen overlay */}
@@ -1281,32 +1317,23 @@ export default function NotebookClient({ minimal = false }: { minimal?: boolean 
           </div>
         )}
 
-        {/* Canvas wrapper */}
+        {/* Canvas wrapper — aspect ratio applied in all non-fullscreen modes */}
         <div
           ref={wrapperRef}
           style={isFullscreen ? {
+            // Fullscreen: fill all space, let the drawing area use all pixels
             position: "relative",
             flex: 1, width: "100%", minHeight: 0,
             overflow: "hidden",
             touchAction: "none", userSelect: "none",
             WebkitUserSelect: "none",
-          } : minimal ? {
-            position: "relative",
-            flex: 1,
-            width: "100%",
-            maxWidth: 900,
-            minHeight: 0,
-            borderRadius: 10,
-            overflow: "hidden",
-            border: "1px solid #2a2a2a",
-            boxShadow: "0 8px 40px rgba(0,0,0,0.5)",
-            touchAction: "none", userSelect: "none",
-            WebkitUserSelect: "none",
           } : {
+            // Normal & minimal: respect chosen aspect ratio, centered, capped by viewport
             position: "relative",
             width: "100%",
             maxWidth: 900,
             aspectRatio: `${1 / canvasRatio}`,
+            maxHeight: "calc(100vh - 64px - 160px)",
             borderRadius: 10,
             overflow: "hidden",
             border: "1px solid #2a2a2a",
