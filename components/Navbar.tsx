@@ -29,14 +29,12 @@ export default function Navbar() {
       <div style={{ flex: 1 }} />
 
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <Link href="/tools" style={linkStyle}>Herramientas</Link>
         <Link href="/pricing" style={linkStyle}>Precios</Link>
 
         {!loading && (
           user ? (
-            <>
-              <Link href="/account" style={linkStyle}>Mi cuenta</Link>
-              <Link href="/tools/notebook" style={btnStyle}>Cuaderno 📓</Link>
-            </>
+            <Link href="/account" style={btnStyle}>Mi cuenta</Link>
           ) : (
             <>
               <Link href="/auth/login"  style={linkStyle}>Iniciar sesión</Link>
