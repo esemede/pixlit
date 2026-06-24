@@ -68,5 +68,13 @@ export async function GET(request: Request) {
   });
 
   const body = await res.text();
-  return NextResponse.json({ status: res.status, body }, { status: res.ok ? 200 : 500 });
+  const html = `<!DOCTYPE html><html><body style="font-family:monospace;padding:2em;background:#111;color:#eee">
+<h2>Migration 002_notebook_shares</h2>
+<p>HTTP Status: <strong>${res.status}</strong></p>
+<pre style="background:#222;padding:1em;border-radius:8px;white-space:pre-wrap">${body.replace(/</g,"&lt;")}</pre>
+</body></html>`;
+  return new Response(html, {
+    status: res.ok ? 200 : 500,
+    headers: { "Content-Type": "text/html; charset=utf-8" },
+  });
 }
