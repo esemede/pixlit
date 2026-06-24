@@ -39,9 +39,10 @@ export default async function MigratePage({
 
   if (secret !== SECRET) {
     return (
-      <html><body style={{ fontFamily: "monospace", background: "#111", color: "#ef4444", padding: "2em" }}>
+      <div style={{ fontFamily: "monospace", color: "#ef4444", padding: "2em" }}>
         <h2>⛔ Unauthorized</h2>
-      </body></html>
+        <p>Pasa ?secret=… correcto</p>
+      </div>
     );
   }
 
@@ -70,19 +71,15 @@ export default async function MigratePage({
     status = 500;
   }
 
-  const color = ok ? "#22c55e" : "#ef4444";
-
   return (
-    <html>
-      <body style={{ fontFamily: "monospace", background: "#0f0f0f", color: "#e5e5e5", padding: "2em" }}>
-        <h2>Migration 002_notebook_shares</h2>
-        <p>Status: <strong style={{ color }}>{status} {ok ? "✅ OK" : "❌ Error"}</strong></p>
-        <p>Supabase URL: {url ? url.slice(0, 40) + "…" : "⚠️ missing"}</p>
-        <p>Service Key: {key ? "✓ present (" + key.slice(0, 12) + "…)" : "⚠️ missing"}</p>
-        <pre style={{ background: "#1a1a1a", padding: "1em", borderRadius: "8px", whiteSpace: "pre-wrap", color: ok ? "#86efac" : "#fca5a5" }}>
-          {body || "(empty response)"}
-        </pre>
-      </body>
-    </html>
+    <div style={{ fontFamily: "monospace", padding: "2em" }}>
+      <h2>Migration 002_notebook_shares</h2>
+      <p>HTTP Status: <strong>{status} {ok ? "OK" : "ERROR"}</strong></p>
+      <p>Supabase URL: {url ? url.slice(0, 50) + "…" : "MISSING"}</p>
+      <p>Service Key: {key ? "present (" + key.slice(0, 15) + "…)" : "MISSING"}</p>
+      <pre style={{ background: "#1a1a1a", color: "#e5e5e5", padding: "1em", borderRadius: "8px", whiteSpace: "pre-wrap" }}>
+        {body || "(empty response — likely success)"}
+      </pre>
+    </div>
   );
 }
