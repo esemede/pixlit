@@ -1284,93 +1284,126 @@ export default function NotebookClient({ minimal = false }: { minimal?: boolean 
     { label: "Blanco", value: { background: "none",   bgColor: "#ffffff", lineColor: "transparent",             marginColor: "transparent"            } },
   ];
 
+  // ── Divider helper ────────────────────────────────────────────────────────
+  const Div = () => (
+    <div style={{ width: 1, height: 26, background: "#2a2a2a", flexShrink: 0 }} />
+  );
+
   // ── Shared JSX ────────────────────────────────────────────────────────────
   const toolbarJSX = (
-    <div style={{ display: "flex", flexWrap: "wrap", gap: "10px", alignItems: "center", padding: "10px 0" }}>
-      {/* Draw tools */}
-      <div style={{ display: "flex", gap: "5px" }}>
+    <div style={{
+      display: "flex", flexWrap: "wrap", gap: "6px",
+      alignItems: "center", padding: "8px 0",
+    }}>
+
+      {/* ── GROUP 1: Drawing tools ── */}
+      <div style={{ display: "flex", gap: "4px", alignItems: "center" }}>
         {(Object.keys(TOOL_CFG) as DrawTool[]).map(t => (
-          <button key={t} onClick={() => setTool(t)} title={`${TOOL_CFG[t].label} (${t[0]})`} style={btnTool(tool === t)}>
+          <button
+            key={t}
+            onClick={() => setTool(t)}
+            title={`${TOOL_CFG[t].label} [${t[0]}]`}
+            style={btnTool(tool === t)}
+          >
             {TOOL_CFG[t].icon}
           </button>
         ))}
       </div>
 
-      <div style={{ width: 1, height: 28, background: "#333" }} />
+      <Div />
 
-      {/* Colors */}
-      <div style={{ display: "flex", gap: "4px", flexWrap: "wrap" }}>
+      {/* ── GROUP 2: Colors + width ── */}
+      <div style={{ display: "flex", gap: "3px", alignItems: "center", flexWrap: "wrap" }}>
         {COLORS.map(c => (
-          <button key={c} onClick={() => setColor(c)} style={{
-            width: 22, height: 22, borderRadius: "50%", background: c,
+          <button key={c} onClick={() => setColor(c)} title={c} style={{
+            width: 20, height: 20, borderRadius: "50%", background: c,
             border: color === c ? "2px solid #8b5cf6" : "2px solid transparent",
             outline: color === c ? "1px solid white" : "none",
-            outlineOffset: 1, cursor: "pointer", padding: 0,
+            outlineOffset: 1, cursor: "pointer", padding: 0, flexShrink: 0,
           }} />
         ))}
-        <input type="color" value={color} onChange={e => setColor(e.target.value)}
+        <input
+          type="color" value={color}
+          onChange={e => setColor(e.target.value)}
           title="Color personalizado"
-          style={{ width: 22, height: 22, borderRadius: "50%", border: "2px solid #444",
-            cursor: "pointer", padding: 0, background: "none" }} />
+          style={{
+            width: 20, height: 20, borderRadius: "50%",
+            border: "2px solid #444", cursor: "pointer",
+            padding: 0, background: "none", flexShrink: 0,
+          }}
+        />
       </div>
 
-      <div style={{ width: 1, height: 28, background: "#333" }} />
-
-      {/* Stroke width */}
-      <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-        <span style={{ color: "#888", fontSize: "11px" }}>Grosor</span>
-        <input type="range" min={1} max={20} value={lineWidth}
+      {/* Width slider */}
+      <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+        <input
+          type="range" min={1} max={20} value={lineWidth}
           onChange={e => setLineWidth(Number(e.target.value))}
-          style={{ width: 72, accentColor: "#8b5cf6" }} />
-        <span style={{ color: "#aaa", fontSize: "11px", minWidth: 16 }}>{lineWidth}</span>
+          style={{ width: 60, accentColor: "#8b5cf6" }}
+          title={`Grosor: ${lineWidth}`}
+        />
+        <span style={{ color: "#555", fontSize: 10, minWidth: 14 }}>{lineWidth}</span>
       </div>
 
-      <div style={{ width: 1, height: 28, background: "#333" }} />
+      <Div />
 
-      {/* Feature toggles */}
-      <button onClick={() => setShapeMode(v => !v)} style={btnToggle(shapeMode)} title="s">
+      {/* ── GROUP 3: Canvas settings ── */}
+      <button
+        onClick={() => setShapeMode(v => !v)}
+        style={btnToggle(shapeMode)}
+        title="Detección automática de figuras [s]"
+      >
         ⬡ Figuras
       </button>
-      <button onClick={() => setPalmReject(v => !v)}
-        style={btnToggle(palmReject, palmReject ? "#22c55e" : "#888")}>
-        {palmReject ? "🤚✕ Anti-palma ON" : "🤚 Anti-palma OFF"}
+
+      <button
+        onClick={() => setPalmReject(v => !v)}
+        style={btnToggle(palmReject, palmReject ? "#22c55e" : "#555")}
+        title="Rechazo de palma (táctil)"
+      >
+        {palmReject ? "🤚 Palm ON" : "🤚 Palm OFF"}
       </button>
 
-      {/* Theme switcher */}
       <select
         value={THEMES.findIndex(t => t.value.background === theme.background)}
         onChange={e => setTheme(THEMES[Number(e.target.value)].value)}
+        title="Fondo del cuaderno"
         style={{
-          background: "#1a1a1a", border: "1px solid #333", borderRadius: 8,
-          color: "#aaa", fontSize: 12, padding: "5px 8px", cursor: "pointer",
+          background: "#141414", border: "1px solid #2a2a2a", borderRadius: 7,
+          color: "#888", fontSize: 11, padding: "4px 8px", cursor: "pointer",
         }}
       >
         {THEMES.map((t, i) => <option key={i} value={i}>{t.label}</option>)}
       </select>
 
-      {/* Canvas size presets */}
       <select
         value={CANVAS_PRESETS.findIndex(p => Math.abs(p.ratio - canvasRatio) < 0.01)}
         onChange={e => {
           const idx = Number(e.target.value);
           if (idx >= 0) setCanvasRatio(CANVAS_PRESETS[idx].ratio);
         }}
+        title="Tamaño de hoja"
         style={{
-          background: "#1a1a1a", border: "1px solid #333", borderRadius: 8,
-          color: "#aaa", fontSize: 12, padding: "5px 8px", cursor: "pointer",
+          background: "#141414", border: "1px solid #2a2a2a", borderRadius: 7,
+          color: "#888", fontSize: 11, padding: "4px 8px", cursor: "pointer",
         }}
       >
         {CANVAS_PRESETS.map((p, i) => <option key={i} value={i}>📄 {p.label}</option>)}
       </select>
 
       {tabletDetected && (
-        <span style={{ fontSize: "11px", color: "#22c55e" }}>✒️ Tablet</span>
+        <span style={{ fontSize: 10, color: "#22c55e" }} title="Stylus detectado">✒️</span>
       )}
 
-      {/* Zoom controls */}
-      <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-        <button onClick={() => applyZoomPan(Math.max(0.1, zoomRef.current / 1.2), panRef.current)}
-          style={{ ...btnTool(false), padding: "3px 8px", fontSize: 14 }}>−</button>
+      <Div />
+
+      {/* ── GROUP 4: Zoom ── */}
+      <div style={{ display: "flex", alignItems: "center", gap: 3 }}>
+        <button
+          onClick={() => applyZoomPan(Math.max(0.1, zoomRef.current / 1.2), panRef.current)}
+          style={{ ...btnTool(false), padding: "2px 8px", fontSize: 14 }}
+          title="Alejar"
+        >−</button>
         <input
           type="text"
           defaultValue={`${Math.round(zoom * 100)}%`}
@@ -1382,102 +1415,95 @@ export default function NotebookClient({ minimal = false }: { minimal?: boolean 
             else applyFit();
           }}
           onKeyDown={e => {
-            if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+            if (e.key === "Enter")  (e.target as HTMLInputElement).blur();
             if (e.key === "Escape") applyFit();
           }}
-          style={{ background: "none", border: "1px solid #333", borderRadius: 6,
-            color: "#aaa", fontSize: 11, padding: "3px 7px", width: 52,
-            textAlign: "center", outline: "none" }}
+          title="Nivel de zoom"
+          style={{
+            background: "none", border: "1px solid #2a2a2a", borderRadius: 6,
+            color: "#666", fontSize: 10, padding: "2px 6px", width: 46,
+            textAlign: "center", outline: "none",
+          }}
         />
-        <button onClick={() => applyZoomPan(Math.min(8, zoomRef.current * 1.2), panRef.current)}
-          style={{ ...btnTool(false), padding: "3px 8px", fontSize: 14 }}>+</button>
+        <button
+          onClick={() => applyZoomPan(Math.min(8, zoomRef.current * 1.2), panRef.current)}
+          style={{ ...btnTool(false), padding: "2px 8px", fontSize: 14 }}
+          title="Acercar"
+        >+</button>
       </div>
 
       <div style={{ flex: 1 }} />
 
-      {/* Actions */}
-      <button className="btn-secondary" onClick={handleUndo} title="Ctrl+Z"
-        style={{ fontSize: "12px", padding: "5px 9px" }}>↩ Deshacer</button>
-      <button className="btn-secondary" onClick={clearPage}
-        style={{ fontSize: "12px", padding: "5px 9px" }}>🗑 Limpiar</button>
-      <button className="btn-secondary" onClick={exportPNG}
-        style={{ fontSize: "12px", padding: "5px 10px" }}>⬇ PNG</button>
-      <button className="btn-secondary" onClick={exportPDF}
-        style={{ fontSize: "12px", padding: "5px 10px" }}>⬇ PDF</button>
-      <button className="btn-secondary" onClick={exportAgentJSON} title="Exportar para agentes IA"
-        style={{ fontSize: "12px", padding: "5px 10px" }}>🤖 JSON</button>
-      <button onClick={toggleFullscreen} style={{ ...btnTool(isFullscreen), fontSize: "14px", padding: "5px 10px" }} title="f">
-        {isFullscreen ? "⛶ Salir" : "⛶ Pantalla completa"}
-      </button>
+      {/* ── GROUP 5: Edit actions ── */}
+      <button onClick={handleUndo} title="Deshacer [Ctrl+Z]"
+        style={{ ...btnTool(false), fontSize: 13, padding: "4px 9px" }}>↩</button>
+      <button onClick={clearPage}  title="Limpiar página"
+        style={{ ...btnTool(false), fontSize: 12, padding: "4px 9px" }}>🗑</button>
 
-      {/* Tools panel toggle */}
-      <button onClick={() => setPanelOpen(v => !v)} style={{
-        ...btnTool(panelOpen), fontSize: "14px", padding: "5px 12px",
-      }} title="QR, Colores, Gradientes">
-        🛠️
-      </button>
+      <Div />
 
-      {/* Voice recorder */}
-      {isRecording ? (
-        <button onClick={stopRecording} style={{
-          ...btnTool(true), background: "rgba(239,68,68,0.3)", border: "1px solid #ef4444",
-          fontSize: "12px", padding: "5px 10px", animation: "pulse 1s infinite",
-        }}>
-          ⏹ {Math.floor(recordingTime / 60)}:{String(recordingTime % 60).padStart(2, "0")}
-        </button>
-      ) : (
-        <button onClick={startRecording} style={{ ...btnTool(false), fontSize: "12px", padding: "5px 10px" }}>
-          🎙 Voz
-        </button>
-      )}
+      {/* ── GROUP 6: Export ── */}
+      <button onClick={exportPNG}        title="Exportar PNG"  style={{ ...btnTool(false), fontSize: 11, padding: "4px 9px" }}>PNG</button>
+      <button onClick={exportPDF}        title="Exportar PDF"  style={{ ...btnTool(false), fontSize: 11, padding: "4px 9px" }}>PDF</button>
+      <button onClick={exportAgentJSON}  title="JSON para agentes IA" style={{ ...btnTool(false), fontSize: 11, padding: "4px 9px" }}>🤖 JSON</button>
 
-      {/* Save button */}
+      <Div />
+
+      {/* ── GROUP 7: View ── */}
+      <button
+        onClick={toggleFullscreen}
+        title={isFullscreen ? "Salir pantalla completa [f]" : "Pantalla completa [f]"}
+        style={{ ...btnTool(isFullscreen), fontSize: 14, padding: "4px 9px" }}
+      >⛶</button>
+
+      <button
+        onClick={() => setPanelOpen(v => !v)}
+        title="Herramientas: QR · Colores · Gradientes · Voz"
+        style={{ ...btnTool(panelOpen), fontSize: 14, padding: "4px 10px" }}
+      >🛠️</button>
+
+      <Div />
+
+      {/* ── GROUP 8: Save / Notebooks ── */}
       <button
         onClick={saveNow}
         disabled={saving || saveState.status === "saving"}
+        title={isAuth ? "Guardar [Ctrl+S]" : "Guardar localmente [Ctrl+S]"}
         style={{
-          ...btnTool(false),
-          fontSize: "12px", padding: "5px 10px",
+          ...btnTool(false), fontSize: 11, padding: "4px 10px",
           opacity: saving || saveState.status === "saving" ? 0.5 : 1,
-          color: saving || saveState.status === "saving" ? "#888"
-               : saveState.status === "saved" ? "#22c55e"
-               : saveState.status === "error" ? "#ef4444"
-               : "#aaa",
+          color:
+            saving || saveState.status === "saving" ? "#555"
+            : saveState.status === "saved"  ? "#22c55e"
+            : saveState.status === "error"  ? "#ef4444"
+            : "#888",
         }}
-        title={isAuth ? "Guardar en servidor (Ctrl+S)" : "Guardar localmente (Ctrl+S)"}
       >
-        {saving || saveState.status === "saving" ? "⏳ Guardando…"
+        {saving || saveState.status === "saving" ? "⏳"
          : saveState.status === "saved"  ? "✓ Guardado"
-         : saveState.status === "error"  ? "⚠ Error al guardar"
+         : saveState.status === "error"  ? "⚠ Error"
          : "💾 Guardar"}
       </button>
-      {!isAuth && localSavedAt && (
-        <span style={{ fontSize: 10, color: "#555" }} title={`Guardado local: ${new Date(localSavedAt).toLocaleTimeString()}`}>
-          local
-        </span>
-      )}
 
-      {/* Notebooks manager */}
-      {isAuth && (
-        <button onClick={() => setNotebooksPanelOpen(true)} style={{
-          ...btnTool(false), fontSize: "12px", padding: "5px 10px",
-        }} title="Mis cuadernos">
+      {isAuth ? (
+        <button
+          onClick={() => setNotebooksPanelOpen(true)}
+          title="Mis cuadernos"
+          style={{ ...btnTool(false), fontSize: 11, padding: "4px 10px" }}
+        >
           📚 Cuadernos
         </button>
-      )}
-
-      {/* Auth gate */}
-      {!isAuth && (
+      ) : (
         <Link href="/auth/login?next=/" style={{
-          fontSize: 12, color: "#a78bfa", textDecoration: "none", padding: "5px 10px",
-          border: "1px solid #8b5cf6", borderRadius: 8,
+          fontSize: 11, color: "#a78bfa", textDecoration: "none",
+          padding: "4px 10px", border: "1px solid #8b5cf633", borderRadius: 8,
         }}>
           ☁ Sync
         </Link>
       )}
+
     </div>
   );
-
   const pagesBarJSX = (
     <div style={{ display: "flex", gap: "5px", alignItems: "center", padding: "0 0 8px" }}>
       {pages.map((_, i) => (
