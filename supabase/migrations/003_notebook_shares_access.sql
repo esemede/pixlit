@@ -35,9 +35,11 @@ create policy "pages: shared edit" on notebook_pages
     exists (
       select 1 from notebook_shares s
       join auth.users u on u.id = auth.uid()
+      join notebooks n on n.id = s.notebook_id
       where s.notebook_id = notebook_pages.notebook_id
         and s.shared_with_email = u.email
         and s.permission = 'edit'
+        and n.user_id = notebook_pages.user_id
     )
   );
 
@@ -68,8 +70,10 @@ create policy "voice_notes: shared edit" on voice_notes
       select 1 from notebook_pages p
       join notebook_shares s on s.notebook_id = p.notebook_id
       join auth.users u on u.id = auth.uid()
+      join notebooks n on n.id = s.notebook_id
       where p.id = voice_notes.page_id
         and s.shared_with_email = u.email
         and s.permission = 'edit'
+        and n.user_id = voice_notes.user_id
     )
   );
