@@ -51,3 +51,4 @@ next-env.d.ts
 # Temp files
 _tmp_*
 .worktrees/
+.superpowers/
