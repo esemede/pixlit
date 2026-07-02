@@ -24,7 +24,7 @@ export async function resolveNotebookAccess(
     .select("permission")
     .eq("notebook_id", notebookId)
     .eq("shared_with_email", userEmail)
-    .single();
+    .maybeSingle();
 
   if (!share) return { role: null, ownerId: notebook.user_id };
   return { role: share.permission as "view" | "edit", ownerId: notebook.user_id };
