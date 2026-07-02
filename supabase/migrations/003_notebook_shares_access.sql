@@ -77,3 +77,14 @@ create policy "voice_notes: shared edit" on voice_notes
         and n.user_id = voice_notes.user_id
     )
   );
+
+-- profiles: a sharee can read the profile of anyone who has shared a notebook with them (for owner_email display)
+create policy "profiles: shared owner read" on profiles
+  for select using (
+    exists (
+      select 1 from notebook_shares s
+      join auth.users u on u.id = auth.uid()
+      where s.owner_id = profiles.id
+        and s.shared_with_email = u.email
+    )
+  );
