@@ -5,7 +5,7 @@ export default async function NotebookPage() {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
 
-  if (!user) redirect("/auth/login?redirectTo=/tools/notebook");
+  if (!user) redirect("/auth/login?next=/tools/notebook");
 
   const { data: notebook } = await supabase
     .from("notebooks")

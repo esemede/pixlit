@@ -15,7 +15,7 @@ export default async function NotebookByIdPage({ params }: Params) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
 
-  if (!user) redirect(`/auth/login?redirectTo=/tools/notebook/${id}`);
+  if (!user) redirect(`/auth/login?next=/tools/notebook/${id}`);
 
   return <NotebookClient initialNotebookId={id} />;
 }
