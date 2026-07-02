@@ -51,9 +51,11 @@ export function useNotebook({ initialNotebookId, onLimitReached }: UseNotebookOp
   // Resolve role whenever the active notebook changes
   useEffect(() => {
     if (!notebookId) { setRole(null); return; }
+    let cancelled = false;
     fetch(`/api/notebooks/${notebookId}`)
       .then(res => res.ok ? res.json() : null)
-      .then(data => setRole(data?.role ?? null));
+      .then(data => { if (!cancelled) setRole(data?.role ?? null); });
+    return () => { cancelled = true; };
   }, [notebookId]);
 
   // Load auth state + notebooks (own + shared)
