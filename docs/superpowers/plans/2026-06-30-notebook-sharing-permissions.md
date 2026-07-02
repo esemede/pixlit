@@ -11,7 +11,7 @@
 ## Global Constraints
 
 - Link format: `/tools/notebook/<id>` (spec §1).
-- No session → redirect to `/auth/login?redirectTo=/tools/notebook/<id>` (spec §1).
+- No session → redirect to `/auth/login?next=/tools/notebook/<id>` (spec §1).
 - `view` role: read-only, no draw, no export (PNG/PDF/JSON), no share management (spec §4).
 - `edit` role: full canvas, but cannot manage collaborators (spec §4).
 - Page-count plan limit is checked against the notebook **owner's** plan, not the actor's (spec §2).
@@ -615,7 +615,7 @@ export default async function NotebookByIdPage({ params }: Params) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
 
-  if (!user) redirect(`/auth/login?redirectTo=/tools/notebook/${id}`);
+  if (!user) redirect(`/auth/login?next=/tools/notebook/${id}`);
 
   return <NotebookClient initialNotebookId={id} />;
 }
@@ -633,7 +633,7 @@ export default async function NotebookPage() {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
 
-  if (!user) redirect("/auth/login?redirectTo=/tools/notebook");
+  if (!user) redirect("/auth/login?next=/tools/notebook");
 
   const { data: notebook } = await supabase
     .from("notebooks")
