@@ -1,11 +1,19 @@
-import type { Metadata } from "next";
-import NotebookClient from "./NotebookClient";
+import { redirect } from "next/navigation";
+import { createClient } from "@/lib/supabase/server";
 
-export const metadata: Metadata = {
-  title: "Cuaderno de Notas — Pixlit",
-  description: "Cuaderno de notas digital con reconocimiento de figuras, stylus, múltiples páginas y exportación PNG/PDF.",
-};
+export default async function NotebookPage() {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
 
-export default function NotebookPage() {
-  return <NotebookClient />;
+  if (!user) redirect("/auth/login?redirectTo=/tools/notebook");
+
+  const { data: notebook } = await supabase
+    .from("notebooks")
+    .select("id")
+    .eq("user_id", user.id)
+    .order("created_at", { ascending: true })
+    .limit(1)
+    .single();
+
+  redirect(notebook ? `/tools/notebook/${notebook.id}` : "/tools/notebook/new");
 }
