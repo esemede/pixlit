@@ -2,8 +2,10 @@
 
 import { useEffect, useRef, useCallback, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import type { NotebookRole } from "@/lib/notebookAccess";
 
 interface UseNotebookOptions {
+  initialNotebookId?: string;
   onLimitReached?: (plan: string, limit: number) => void;
 }
 
@@ -16,12 +18,21 @@ export interface Notebook {
   updated_at: string;
 }
 
-export function useNotebook({ onLimitReached }: UseNotebookOptions = {}) {
-  const [notebookId, setNotebookId] = useState<string | null>(null);
+export interface SharedNotebook {
+  id: string;
+  name: string;
+  owner_email: string;
+  permission: "view" | "edit";
+}
+
+export function useNotebook({ initialNotebookId, onLimitReached }: UseNotebookOptions = {}) {
+  const [notebookId, setNotebookId] = useState<string | null>(initialNotebookId ?? null);
   const [userId,     setUserId]     = useState<string | null>(null);
   const [isAuth,     setIsAuth]     = useState(false);
+  const [role,       setRole]       = useState<NotebookRole>(null);
   const [saveState,  setSaveState]  = useState<SaveState>({ status: "idle" });
   const [notebooks,  setNotebooks]  = useState<Notebook[]>([]);
+  const [sharedNotebooks, setSharedNotebooks] = useState<SharedNotebook[]>([]);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const refreshNotebooks = useCallback(async () => {
@@ -31,16 +42,31 @@ export function useNotebook({ onLimitReached }: UseNotebookOptions = {}) {
     return data.notebooks as Notebook[] | undefined;
   }, []);
 
-  // Load auth state + default notebook
+  const refreshSharedNotebooks = useCallback(async () => {
+    const res  = await fetch("/api/notebooks/shared");
+    const data = await res.json();
+    if (data.notebooks) setSharedNotebooks(data.notebooks);
+  }, []);
+
+  // Resolve role whenever the active notebook changes
+  useEffect(() => {
+    if (!notebookId) { setRole(null); return; }
+    fetch(`/api/notebooks/${notebookId}`)
+      .then(res => res.ok ? res.json() : null)
+      .then(data => setRole(data?.role ?? null));
+  }, [notebookId]);
+
+  // Load auth state + notebooks (own + shared)
   useEffect(() => {
     const supabase = createClient();
     supabase.auth.getUser().then(async ({ data: { user } }) => {
       if (!user) { setIsAuth(false); return; }
       setIsAuth(true); setUserId(user.id);
       const list = await refreshNotebooks();
-      if (list && list.length > 0) setNotebookId(list[0].id);
+      await refreshSharedNotebooks();
+      if (!initialNotebookId && list && list.length > 0) setNotebookId(list[0].id);
     });
-  }, [refreshNotebooks]);
+  }, [refreshNotebooks, refreshSharedNotebooks, initialNotebookId]);
 
   /** Switch active notebook */
   const switchNotebook = useCallback((id: string) => {
@@ -127,8 +153,8 @@ export function useNotebook({ onLimitReached }: UseNotebookOptions = {}) {
   }, [notebookId]);
 
   return {
-    notebookId, userId, isAuth, saveState,
-    notebooks, refreshNotebooks, switchNotebook,
+    notebookId, userId, isAuth, role, saveState,
+    notebooks, sharedNotebooks, refreshNotebooks, refreshSharedNotebooks, switchNotebook,
     createNotebook, renameNotebook, deleteNotebook,
     loadPage, savePage, addPage,
   };
