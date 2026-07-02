@@ -2,6 +2,7 @@
 
 import { useRef, useEffect, useState, useCallback } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import type { RealtimeChannel } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/client";
 import { useNotebook } from "@/lib/useNotebook";
@@ -498,6 +499,8 @@ export default function NotebookClient({ minimal = false, initialNotebookId }: {
   const mediaRecorderRef  = useRef<MediaRecorder | null>(null);
   const audioChunksRef    = useRef<Blob[]>([]);
   const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const router = useRouter();
 
   const {
     notebookId,
@@ -1728,6 +1731,8 @@ export default function NotebookClient({ minimal = false, initialNotebookId }: {
         onCreate={createNotebook}
         onRename={renameNotebook}
         onDelete={deleteNotebook}
+        sharedNotebooks={sharedNotebooks}
+        onSwitchShared={(id) => { switchNotebook(id); setNotebooksPanelOpen(false); router.push(`/tools/notebook/${id}`); }}
       />
 
       {/* Footer hints — only in non-minimal, non-fullscreen mode */}

@@ -78,7 +78,7 @@ export default function ShareModal({ isOpen, notebookId, notebookName, onClose }
   };
 
   const copyLink = async () => {
-    const url = `${window.location.origin}/tools/notebook`;
+    const url = `${window.location.origin}/tools/notebook/${notebookId}`;
     await navigator.clipboard.writeText(url);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);

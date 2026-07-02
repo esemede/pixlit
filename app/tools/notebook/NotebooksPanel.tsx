@@ -13,11 +13,14 @@ interface Props {
   onCreate: (name: string) => Promise<{ ok: boolean; notebook?: Notebook; error?: string }>;
   onRename: (id: string, name: string) => Promise<boolean>;
   onDelete: (id: string) => Promise<boolean>;
+  sharedNotebooks?: { id: string; name: string; owner_email: string; permission: "view" | "edit" }[];
+  onSwitchShared?: (id: string) => void;
 }
 
 export default function NotebooksPanel({
   isOpen, notebooks, activeId, onClose,
   onSwitch, onCreate, onRename, onDelete,
+  sharedNotebooks, onSwitchShared,
 }: Props) {
   const [newName,         setNewName]         = useState("");
   const [creating,        setCreating]        = useState(false);
@@ -273,6 +276,38 @@ export default function NotebooksPanel({
               })}
             </div>
           </div>
+
+          {sharedNotebooks && sharedNotebooks.length > 0 && (
+            <>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "#666", padding: "12px 16px 6px", textTransform: "uppercase" as const }}>
+                Compartidos conmigo
+              </div>
+              {sharedNotebooks.map(nb => (
+                <div
+                  key={nb.id}
+                  onClick={() => onSwitchShared?.(nb.id)}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 8,
+                    padding: "10px 16px", cursor: "pointer", borderBottom: "1px solid #1a1a1a",
+                  }}
+                >
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 13, color: "#e5e5e5", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {nb.name}
+                    </div>
+                    <div style={{ fontSize: 10, color: "#555" }}>{nb.owner_email}</div>
+                  </div>
+                  <span style={{
+                    fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 999,
+                    background: nb.permission === "edit" ? "rgba(139,92,246,0.2)" : "rgba(34,197,94,0.15)",
+                    color: nb.permission === "edit" ? "#a78bfa" : "#86efac",
+                  }}>
+                    {nb.permission === "edit" ? "Editar" : "Ver"}
+                  </span>
+                </div>
+              ))}
+            </>
+          )}
 
           {/* Create new */}
           <div style={{ padding: "12px 16px", borderTop: "1px solid #222" }}>
