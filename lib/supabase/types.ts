@@ -48,6 +48,20 @@ export interface Database {
         };
         Update: Partial<Database["public"]["Tables"]["notebook_pages"]["Row"]>;
       };
+      notebook_shares: {
+        Row: {
+          id:                string;
+          notebook_id:       string;
+          owner_id:          string;
+          shared_with_email: string;
+          permission:        "view" | "edit";
+          created_at:        string;
+        };
+        Insert: Partial<Database["public"]["Tables"]["notebook_shares"]["Row"]> & {
+          notebook_id: string; owner_id: string; shared_with_email: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["notebook_shares"]["Row"]>;
+      };
       voice_notes: {
         Row: {
           id:               string;

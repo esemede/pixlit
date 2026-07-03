@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { resolveNotebookAccess } from "@/lib/notebookAccess";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -168,22 +169,14 @@ export async function GET(req: Request, { params }: Params) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  // Verify notebook ownership
-  const { data: notebook } = await supabase
-    .from("notebooks")
-    .select("id")
-    .eq("id", id)
-    .eq("user_id", user.id)
-    .single();
-
-  if (!notebook) return NextResponse.json({ error: "Notebook not found" }, { status: 404 });
+  const access = await resolveNotebookAccess(supabase, user.id, user.email!, id);
+  if (!access.role) return NextResponse.json({ error: "Notebook not found" }, { status: 404 });
 
   // Fetch pages
   let query = supabase
     .from("notebook_pages")
     .select("page_number, strokes")
     .eq("notebook_id", id)
-    .eq("user_id", user.id)
     .order("page_number", { ascending: true });
 
   if (pageParam) query = query.eq("page_number", Number(pageParam));

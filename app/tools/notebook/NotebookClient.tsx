@@ -2,6 +2,7 @@
 
 import { useRef, useEffect, useState, useCallback } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import type { RealtimeChannel } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/client";
 import { useNotebook } from "@/lib/useNotebook";
@@ -462,7 +463,7 @@ function gradientCoords(dir: string, w: number, h: number): [number, number, num
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
-export default function NotebookClient({ minimal = false }: { minimal?: boolean }) {
+export default function NotebookClient({ minimal = false, initialNotebookId }: { minimal?: boolean; initialNotebookId?: string }) {
   const bgCanvasRef  = useRef<HTMLCanvasElement>(null);
   const canvasRef    = useRef<HTMLCanvasElement>(null);
   const overlayRef   = useRef<HTMLCanvasElement>(null);
@@ -499,11 +500,16 @@ export default function NotebookClient({ minimal = false }: { minimal?: boolean 
   const audioChunksRef    = useRef<Blob[]>([]);
   const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  const router = useRouter();
+
   const {
     notebookId,
     isAuth,
     saveState,
     notebooks,
+    role,
+    sharedNotebooks,
+    refreshSharedNotebooks,
     switchNotebook,
     createNotebook,
     renameNotebook,
@@ -512,6 +518,7 @@ export default function NotebookClient({ minimal = false }: { minimal?: boolean 
     savePage: savePageToServer,
     addPage: addPageToServer,
   } = useNotebook({
+    initialNotebookId,
     onLimitReached: () => { window.location.href = "/pricing?reason=pages"; },
   });
 
@@ -546,6 +553,8 @@ export default function NotebookClient({ minimal = false }: { minimal?: boolean 
   useEffect(() => { shapeModeRef.current = shapeMode; }, [shapeMode]);
   useEffect(() => { palmRejectRef.current = palmReject; }, [palmReject]);
   useEffect(() => { pageIdxRef.current    = pageIdx;  }, [pageIdx]);
+  const roleRef = useRef(role);
+  useEffect(() => { roleRef.current = role; }, [role]);
   useEffect(() => { pagesRef.current      = pages;    }, [pages]);
   const canvasRatioRef = useRef(canvasRatio);
   useEffect(() => { canvasRatioRef.current = canvasRatio; }, [canvasRatio]);
@@ -870,6 +879,8 @@ export default function NotebookClient({ minimal = false }: { minimal?: boolean 
 
       if (shouldReject(e)) { rejectedIds.current.add(e.pointerId); return; }
 
+      if (roleRef.current === "view") return;
+
       drawing.current   = true;
       curStroke.current = {
         tool:      toolRef.current,
@@ -1039,6 +1050,7 @@ export default function NotebookClient({ minimal = false }: { minimal?: boolean 
 
   // ── Actions ───────────────────────────────────────────────────────────────
   const handleUndo = useCallback(() => {
+    if (role === "view") return;
     const idx   = pageIdxRef.current;
     const stack = undoStack.current[idx] ?? [];
     let restored: Page;
@@ -1053,18 +1065,20 @@ export default function NotebookClient({ minimal = false }: { minimal?: boolean 
     pagesRef.current = next;
     setPages([...next]);
     setTimeout(redraw, 0);
-  }, [redraw]);
+  }, [redraw, role]);
 
   const clearPage = useCallback(() => {
+    if (role === "view") return;
     const idx  = pageIdxRef.current;
     const next = pagesRef.current.map((p, i) => i === idx ? { strokes: [] } : p);
     pagesRef.current = next;
     undoStack.current[idx] = [];
     setPages([...next]);
     setTimeout(redraw, 0);
-  }, [redraw]);
+  }, [redraw, role]);
 
   const addPage = useCallback(async () => {
+    if (role === "view") return;
     if (isAuth) {
       const { ok, error } = await addPageToServer();
       if (!ok) {
@@ -1077,9 +1091,10 @@ export default function NotebookClient({ minimal = false }: { minimal?: boolean 
     undoStack.current.push([]);
     setPages([...next]);
     setPageIdx(next.length - 1);
-  }, [isAuth, addPageToServer]);
+  }, [isAuth, addPageToServer, role]);
 
   const deletePage = useCallback(async (idx: number) => {
+    if (role === "view") return;
     if (pagesRef.current.length <= 1) return;
     const next = pagesRef.current.filter((_, i) => i !== idx);
     pagesRef.current = next;
@@ -1091,7 +1106,7 @@ export default function NotebookClient({ minimal = false }: { minimal?: boolean 
     if (isAuth && notebookIdRef.current) {
       await fetch(`/api/notebooks/${notebookIdRef.current}/pages/${idx + 1}`, { method: "DELETE" });
     }
-  }, [isAuth, redraw]);
+  }, [isAuth, redraw, role]);
 
   const [saving, setSaving] = useState(false);
   const saveNow = useCallback(async () => {
@@ -1179,6 +1194,7 @@ export default function NotebookClient({ minimal = false }: { minimal?: boolean 
 
   // ── Insert image (QR or any raster) onto canvas ──────────────────────────
   const insertImage = useCallback((dataUrl: string, displaySize: number) => {
+    if (role === "view") return;
     const img = new Image();
     img.onload = () => {
       imageCacheRef.current.set(dataUrl, img);
@@ -1205,7 +1221,7 @@ export default function NotebookClient({ minimal = false }: { minimal?: boolean 
       savePageToServer(idx + 1, next[idx].strokes as unknown[]);
     };
     img.src = dataUrl;
-  }, [redraw, savePageToServer]);
+  }, [redraw, savePageToServer, role]);
 
   const handleSetBgColor = useCallback((c: string) => {
     setBgGradient(null);
@@ -1443,9 +1459,15 @@ export default function NotebookClient({ minimal = false }: { minimal?: boolean 
       <Div />
 
       {/* ── GROUP 6: Export ── */}
-      <button onClick={exportPNG}        title="Exportar PNG"  style={{ ...btnTool(false), fontSize: 11, padding: "4px 9px" }}>PNG</button>
-      <button onClick={exportPDF}        title="Exportar PDF"  style={{ ...btnTool(false), fontSize: 11, padding: "4px 9px" }}>PDF</button>
-      <button onClick={exportAgentJSON}  title="JSON para agentes IA" style={{ ...btnTool(false), fontSize: 11, padding: "4px 9px" }}>🤖 JSON</button>
+      {role !== "view" && (
+        <button onClick={exportPNG}        title="Exportar PNG"  style={{ ...btnTool(false), fontSize: 11, padding: "4px 9px" }}>PNG</button>
+      )}
+      {role !== "view" && (
+        <button onClick={exportPDF}        title="Exportar PDF"  style={{ ...btnTool(false), fontSize: 11, padding: "4px 9px" }}>PDF</button>
+      )}
+      {role !== "view" && (
+        <button onClick={exportAgentJSON}  title="JSON para agentes IA" style={{ ...btnTool(false), fontSize: 11, padding: "4px 9px" }}>🤖 JSON</button>
+      )}
 
       <Div />
 
@@ -1463,6 +1485,16 @@ export default function NotebookClient({ minimal = false }: { minimal?: boolean 
       >🛠️</button>
 
       <Div />
+
+      {role === "view" && (
+        <span style={{
+          fontSize: 11, fontWeight: 700, color: "#86efac",
+          background: "rgba(34,197,94,0.15)", border: "1px solid #22c55e44",
+          borderRadius: 999, padding: "2px 10px",
+        }}>
+          Solo lectura
+        </span>
+      )}
 
       {/* ── GROUP 8: Save / Notebooks ── */}
       <button
@@ -1699,6 +1731,8 @@ export default function NotebookClient({ minimal = false }: { minimal?: boolean 
         onCreate={createNotebook}
         onRename={renameNotebook}
         onDelete={deleteNotebook}
+        sharedNotebooks={sharedNotebooks}
+        onSwitchShared={(id) => { switchNotebook(id); setNotebooksPanelOpen(false); router.push(`/tools/notebook/${id}`); }}
       />
 
       {/* Footer hints — only in non-minimal, non-fullscreen mode */}
