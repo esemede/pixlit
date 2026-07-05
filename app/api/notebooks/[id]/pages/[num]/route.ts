@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { PLANS } from "@/lib/plans";
+import type { PlanId } from "@/lib/plans";
 import { resolveNotebookAccess, canWrite } from "@/lib/notebookAccess";
+import { assertStorageQuota, estimateJsonBytes, formatBytes } from "@/lib/storageQuota";
 
 type Params = { params: Promise<{ id: string; num: string }> };
 
@@ -41,6 +44,45 @@ export async function PUT(request: Request, { params }: Params) {
   const body = await request.json().catch(() => null);
   if (!body || !Array.isArray(body.strokes)) {
     return NextResponse.json({ error: "strokes array required" }, { status: 400 });
+  }
+
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("plan")
+    .eq("id", access.ownerId!)
+    .single();
+
+  const plan = (profile?.plan ?? "free") as PlanId;
+  const planCfg = PLANS[plan];
+  const { data: existingPage } = await supabase
+    .from("notebook_pages")
+    .select("strokes")
+    .eq("notebook_id", id)
+    .eq("user_id", access.ownerId!)
+    .eq("page_number", Number(num))
+    .maybeSingle();
+
+  const existingPageBytes = estimateJsonBytes(existingPage?.strokes ?? []);
+  const incomingPageBytes = estimateJsonBytes(body.strokes);
+  const quota = await assertStorageQuota({
+    supabase,
+    userId: access.ownerId!,
+    plan,
+    addBytes: incomingPageBytes,
+    replacedBytes: existingPageBytes,
+  });
+
+  if (!quota.ok) {
+    return NextResponse.json(
+      {
+        error: `Límite de almacenamiento del plan ${planCfg.name} excedido. Usarías ${formatBytes(quota.projectedBytes)} de ${formatBytes(quota.limitBytes)}.`,
+        plan,
+        limit: quota.limitBytes,
+        used: quota.totalBytes,
+        projected: quota.projectedBytes,
+      },
+      { status: 403 },
+    );
   }
 
   const { data, error } = await supabase

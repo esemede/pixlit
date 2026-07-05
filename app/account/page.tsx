@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { PLANS } from "@/lib/plans";
+import { getUserStorageUsage } from "@/lib/storageQuota";
 import AccountClient from "./AccountClient";
 
 export default async function AccountPage() {
@@ -27,6 +28,12 @@ export default async function AccountPage() {
     .select("id", { count: "exact", head: true })
     .eq("user_id", user.id);
 
+  const storageUsage = await getUserStorageUsage(supabase, user.id);
+  const storageUsedBytes = storageUsage.totalBytes;
+  const storagePct = planCfg.maxStorageBytes > 0
+    ? Math.min(100, (storageUsedBytes / planCfg.maxStorageBytes) * 100)
+    : 0;
+
   return (
     <AccountClient
       email={user.email ?? ""}
@@ -40,6 +47,8 @@ export default async function AccountPage() {
       voiceMaxSec={maxSec}
       voicePct={voicePct}
       pageCount={pageCount ?? 0}
+      storageUsedBytes={storageUsedBytes}
+      storagePct={storagePct}
       notebookTheme={profile?.notebook_theme ?? null}
     />
   );

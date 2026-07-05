@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
 import { PayPalScriptProvider } from "@paypal/react-paypal-js";
-import { PLAN_LIST } from "@/lib/plans";
+import { PLAN_LIST, storageLimitLabel } from "@/lib/plans";
 import type { PlanId } from "@/lib/plans";
 
 // Lazy-load PayPalSubscribeButton (client-only, avoids SSR issues)
@@ -41,7 +41,7 @@ export default function PricingPage() {
       if (res.status === 401) { router.push(`/auth/login?next=/pricing`); return; }
       setError(data.error); setLoading(null); return;
     }
-    if (data.url) window.location.href = data.url;
+    if (data.url) window.location.assign(data.url);
     setLoading(null);
   };
 
@@ -152,6 +152,10 @@ export default function PricingPage() {
                       </div>
                     </>
                   )}
+                </div>
+
+                <div style={{ color: "#888", fontSize: 12 }}>
+                  {plan.maxNotebooks === -1 ? "Notas ilimitadas" : `Hasta ${plan.maxNotebooks} notas`} · {storageLimitLabel(plan.id)} de almacenamiento
                 </div>
 
                 <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "flex", flexDirection: "column", gap: 8, flex: 1 }}>

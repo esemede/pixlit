@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import type { Plan, PlanId } from "@/lib/plans";
+import { storageLimitLabel } from "@/lib/plans";
 import type { NotebookTheme } from "@/lib/supabase/types";
 import { createClient } from "@/lib/supabase/client";
 
@@ -19,6 +20,8 @@ interface Props {
   voiceMaxSec:    number;
   voicePct:       number;
   pageCount:      number;
+  storageUsedBytes: number;
+  storagePct:     number;
   notebookTheme:  NotebookTheme | null;
 }
 
@@ -31,7 +34,8 @@ const BG_OPTIONS: { value: NotebookTheme["background"]; label: string }[] = [
 
 export default function AccountClient({
   email, displayName, plan, planCfg, subStatus, subProvider,
-  subPeriodEnd, voiceUsedSec, voiceMaxSec, voicePct, pageCount, notebookTheme,
+  subPeriodEnd, voiceUsedSec, voiceMaxSec, voicePct, pageCount,
+  storageUsedBytes, storagePct, notebookTheme,
 }: Props) {
   const router        = useRouter();
   const searchParams  = useSearchParams();
@@ -46,14 +50,15 @@ export default function AccountClient({
   // After PayPal checkout, poll /api/user/me until plan activates (max 90s)
   useEffect(() => {
     if (searchParams.get("checkout") !== "success") return;
-    setCheckoutOk(true);
+    // React 19 lint dislikes synchronous setState in effects; this is a URL-derived banner.
+    queueMicrotask(() => setCheckoutOk(true));
     window.history.replaceState({}, "", "/account");
 
     // Only poll when provider is paypal (Stripe/MP activate synchronously via redirect)
     if (searchParams.get("provider") !== "paypal") return;
     if (plan !== "free") return; // already activated (race: server rendered updated plan)
 
-    setActivating(true);
+    queueMicrotask(() => setActivating(true));
     let elapsed = 0;
     pollRef.current = setInterval(async () => {
       elapsed += 3;
@@ -98,7 +103,7 @@ export default function AccountClient({
     setPortalLoading(true);
     const res = await fetch("/api/billing/portal", { method: "POST" });
     const { url, error } = await res.json();
-    if (url) window.location.href = url;
+    if (url) window.location.assign(url);
     else alert(error ?? "Error al abrir el portal");
     setPortalLoading(false);
   };
@@ -106,6 +111,15 @@ export default function AccountClient({
   const fmtSec = (s: number) => {
     const m = Math.floor(s / 60), sec = s % 60;
     return `${m}m ${sec}s`;
+  };
+
+  const fmtBytes = (bytes: number) => {
+    const mb = 1024 * 1024;
+    const gb = 1024 * mb;
+    if (bytes >= gb) return `${(bytes / gb).toFixed(1)} GB`;
+    if (bytes >= mb) return `${(bytes / mb).toFixed(1)} MB`;
+    if (bytes >= 1024) return `${Math.round(bytes / 1024)} KB`;
+    return `${bytes} bytes`;
   };
 
   return (
@@ -208,7 +222,7 @@ export default function AccountClient({
       {/* Usage */}
       <section style={sectionStyle}>
         <h2 style={h2Style}>Uso</h2>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 16 }}>
           <div style={statCard}>
             <div style={{ color: "#888", fontSize: 12 }}>Páginas usadas</div>
             <div style={{ color: "#fff", fontSize: 22, fontWeight: 700 }}>
@@ -225,6 +239,9 @@ export default function AccountClient({
                 ? <span style={{ color: "#555", fontSize: 14 }}>No disponible</span>
                 : fmtSec(voiceUsedSec)
               }
+              <span style={{ color: "#555", fontSize: 13 }}>
+                {voiceMaxSec > 0 ? ` / ${fmtSec(voiceMaxSec)}` : ""}
+              </span>
             </div>
             {planCfg.maxVoiceSeconds > 0 && (
               <div style={{ marginTop: 6, background: "#222", borderRadius: 99, height: 4 }}>
@@ -234,6 +251,21 @@ export default function AccountClient({
                 }} />
               </div>
             )}
+          </div>
+          <div style={statCard}>
+            <div style={{ color: "#888", fontSize: 12 }}>Almacenamiento usado</div>
+            <div style={{ color: "#fff", fontSize: 22, fontWeight: 700 }}>
+              {fmtBytes(storageUsedBytes)}
+              <span style={{ color: "#555", fontSize: 13 }}>
+                {" "}/{" "}{storageLimitLabel(plan)}
+              </span>
+            </div>
+            <div style={{ marginTop: 6, background: "#222", borderRadius: 99, height: 4 }}>
+              <div style={{
+                width:      `${storagePct}%`, height: "100%",
+                background: storagePct > 90 ? "#ef4444" : "#8b5cf6", borderRadius: 99,
+              }} />
+            </div>
           </div>
         </div>
       </section>
