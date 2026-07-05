@@ -33,3 +33,15 @@ test('account surfaces storage usage and pricing exposes storage labels', () => 
   const pricing = read('app/pricing/page.tsx');
   assert.match(pricing, /storageLimitLabel/);
 });
+
+test('Google OAuth users are kept in profiles before premium grants are applied', () => {
+  const callback = read('app/auth/callback/route.ts');
+  assert.match(callback, /createAdminClient/);
+  assert.match(callback, /\.from\("profiles"\)/);
+  assert.match(callback, /upsert/);
+
+  const migration = read('supabase/migrations/005_sync_auth_users_profiles.sql');
+  assert.match(migration, /from auth\.users u/);
+  assert.match(migration, /on_auth_user_created/);
+  assert.match(migration, /where lower\(email\) = 'domoedse@gmail\.com'/);
+});
