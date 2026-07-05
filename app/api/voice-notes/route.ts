@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { PLANS } from "@/lib/plans";
+import { assertStorageQuota, formatBytes } from "@/lib/storageQuota";
 
 /** GET /api/voice-notes?page_id=xxx — list voice notes for a page (or all) */
 export async function GET(request: Request) {
@@ -54,6 +55,26 @@ export async function POST(request: Request) {
   const durationSec = Number(formData.get("duration_seconds") ?? 0);
 
   if (!file) return NextResponse.json({ error: "audio file required" }, { status: 400 });
+
+  const storageQuota = await assertStorageQuota({
+    supabase,
+    userId: user.id,
+    plan,
+    addBytes: file.size,
+  });
+
+  if (!storageQuota.ok) {
+    return NextResponse.json(
+      {
+        error: `Límite de almacenamiento del plan ${planCfg.name} excedido. Usarías ${formatBytes(storageQuota.projectedBytes)} de ${formatBytes(storageQuota.limitBytes)}.`,
+        plan,
+        limit: storageQuota.limitBytes,
+        used: storageQuota.totalBytes,
+        projected: storageQuota.projectedBytes,
+      },
+      { status: 403 },
+    );
+  }
 
   // Check voice quota
   const usedSec = profile?.voice_seconds_used ?? 0;
