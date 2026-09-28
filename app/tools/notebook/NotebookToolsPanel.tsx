@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, useCallback } from "react";
+import { useRef, useState } from "react";
 import { QRCodeCanvas } from "qrcode.react";
 
 // ── Color utilities (subset from ColorPaletteClient) ─────────────────────────
@@ -79,9 +79,7 @@ const GRADIENT_DIRS = [
 export type PanelTab = "qr" | "color" | "gradient";
 
 interface Props {
-  isOpen:           boolean;
   activeTab:        PanelTab;
-  onClose:          () => void;
   onTabChange:      (tab: PanelTab) => void;
   onInsertImage:    (dataUrl: string, size: number) => void;
   onSetBgColor:     (color: string) => void;
@@ -91,9 +89,10 @@ interface Props {
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
+// Content only: positioning, dragging and chrome are provided by FloatingPanel.
 
 export default function NotebookToolsPanel({
-  isOpen, activeTab, onClose, onTabChange,
+  activeTab, onTabChange,
   onInsertImage, onSetBgColor, onSetBgGradient, onClearGradient, onSetDrawColor,
 }: Props) {
   // QR state
@@ -114,45 +113,6 @@ export default function NotebookToolsPanel({
   const [gColor2, setGColor2] = useState("#06b6d4");
   const [gDir,    setGDir]    = useState("to right");
 
-  // Drag state
-  const panelRef   = useRef<HTMLDivElement>(null);
-  const [pos,      setPos]      = useState<{ x: number; y: number } | null>(null);
-  const [dragging, setDragging] = useState(false);
-  const dragOrigin = useRef<{ mx: number; my: number; px: number; py: number } | null>(null);
-
-  const onHeaderPointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
-    if (e.button !== 0) return;
-    e.preventDefault();
-    e.stopPropagation();
-    const panel  = panelRef.current;
-    const parent = panel?.parentElement;
-    if (!panel || !parent) return;
-
-    const pr = panel.getBoundingClientRect();
-    const cr = parent.getBoundingClientRect();
-    const currentX = pr.left - cr.left;
-    const currentY = pr.top  - cr.top;
-
-    dragOrigin.current = { mx: e.clientX, my: e.clientY, px: currentX, py: currentY };
-    setPos({ x: currentX, y: currentY });
-    setDragging(true);
-    panel.setPointerCapture(e.pointerId);
-  }, []);
-
-  const onPointerMove = useCallback((e: React.PointerEvent) => {
-    if (!dragging || !dragOrigin.current) return;
-    const dx = e.clientX - dragOrigin.current.mx;
-    const dy = e.clientY - dragOrigin.current.my;
-    setPos({ x: dragOrigin.current.px + dx, y: dragOrigin.current.py + dy });
-  }, [dragging]);
-
-  const onPointerUp = useCallback(() => {
-    setDragging(false);
-    dragOrigin.current = null;
-  }, []);
-
-  if (!isOpen) return null;
-
   const handleInsertQR = () => {
     const canvas = qrContainerRef.current?.querySelector("canvas");
     if (!canvas) return;
@@ -163,73 +123,33 @@ export default function NotebookToolsPanel({
 
   const resolvedQrSize = qrCustom ? (Number(qrCustom) || qrSize) : qrSize;
 
-  const posStyle: React.CSSProperties = pos
-    ? { position: "absolute", left: pos.x, top: pos.y }
-    : { position: "absolute", right: 12, bottom: 12 };
-
   return (
-    <div
-      ref={panelRef}
-      onPointerMove={onPointerMove}
-      onPointerUp={onPointerUp}
-      onPointerCancel={onPointerUp}
-      style={{
-        ...posStyle,
-        width:        300,
-        background:   "rgba(20,20,28,0.97)",
-        backdropFilter: "blur(16px)",
-        border:       "1px solid #3a3a4a",
-        borderRadius: 14,
-        boxShadow:    "0 16px 48px rgba(0,0,0,0.6)",
-        zIndex:       100,
-        overflow:     "hidden",
-        userSelect:   "none",
-      }}>
-      {/* Header + tabs */}
-      <div
-        onPointerDown={onHeaderPointerDown}
-        style={{
-          borderBottom: "1px solid #2a2a3a", padding: "10px 12px 0",
-          cursor: dragging ? "grabbing" : "grab",
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "center", marginBottom: 8 }}>
-          <span style={{ color: "#888", fontSize: 11, marginRight: 6, letterSpacing: 1 }}>⠿⠿</span>
-          <span style={{ color: "#aaa", fontSize: 12, fontWeight: 700, flex: 1 }}>HERRAMIENTAS</span>
-          <button
-            onPointerDown={e => e.stopPropagation()}
-            onClick={onClose}
-            style={{
-              background: "none", border: "none", color: "#555", cursor: "pointer",
-              fontSize: 18, lineHeight: 1, padding: "0 2px",
-            }}
-          >×</button>
-        </div>
-        <div style={{ display: "flex", gap: 4 }}>
-          {([
-            { id: "qr",       label: "🔲 QR"      },
-            { id: "color",    label: "🎨 Colores"  },
-            { id: "gradient", label: "🌈 Gradiente"},
-          ] as { id: PanelTab; label: string }[]).map(tab => (
-            <button key={tab.id} onPointerDown={e => e.stopPropagation()} onClick={() => onTabChange(tab.id)} style={{
-              background:   activeTab === tab.id ? "rgba(139,92,246,0.25)" : "none",
-              borderTop:    activeTab === tab.id ? "1px solid rgba(139,92,246,0.6)" : "1px solid transparent",
-              borderRight:  activeTab === tab.id ? "1px solid rgba(139,92,246,0.6)" : "1px solid transparent",
-              borderLeft:   activeTab === tab.id ? "1px solid rgba(139,92,246,0.6)" : "1px solid transparent",
-              borderBottom: "none",
-              borderRadius: "7px 7px 0 0",
-              color:        activeTab === tab.id ? "#c4b5fd" : "#666",
-              cursor:       "pointer",
-              fontSize:     11,
-              fontWeight:   600,
-              padding:      "5px 10px",
-            }}>{tab.label}</button>
-          ))}
-        </div>
+    <div style={{ width: "100%", minWidth: 280, display: "flex", flexDirection: "column", minHeight: 0 }}>
+      {/* Tabs */}
+      <div style={{ borderBottom: "1px solid #2a2a3a", display: "flex", gap: 4 }}>
+        {([
+          { id: "qr",       label: "🔲 QR"      },
+          { id: "color",    label: "🎨 Colores"  },
+          { id: "gradient", label: "🌈 Gradiente"},
+        ] as { id: PanelTab; label: string }[]).map(tab => (
+          <button key={tab.id} onClick={() => onTabChange(tab.id)} style={{
+            background:   activeTab === tab.id ? "rgba(139,92,246,0.25)" : "none",
+            borderTop:    activeTab === tab.id ? "1px solid rgba(139,92,246,0.6)" : "1px solid transparent",
+            borderRight:  activeTab === tab.id ? "1px solid rgba(139,92,246,0.6)" : "1px solid transparent",
+            borderLeft:   activeTab === tab.id ? "1px solid rgba(139,92,246,0.6)" : "1px solid transparent",
+            borderBottom: "none",
+            borderRadius: "7px 7px 0 0",
+            color:        activeTab === tab.id ? "#c4b5fd" : "#666",
+            cursor:       "pointer",
+            fontSize:     11,
+            fontWeight:   600,
+            padding:      "5px 10px",
+          }}>{tab.label}</button>
+        ))}
       </div>
 
       {/* Content */}
-      <div style={{ padding: 14, maxHeight: 480, overflowY: "auto" }}>
+      <div style={{ padding: "14px 2px 2px" }}>
 
         {/* ── QR TAB ─────────────────────────────────────────────────────── */}
         {activeTab === "qr" && (

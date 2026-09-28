@@ -13,6 +13,9 @@ pixlit/
 │   │   ├── page.tsx                # Grilla de todas las herramientas
 │   │   ├── notebook/
 │   │   │   ├── NotebookClient.tsx  # Componente principal del cuaderno
+│   │   │   ├── FloatingPanel.tsx   # Panel flotante (mover, plegar, redimensionar, orientar)
+│   │   │   ├── WorkspaceMenu.tsx   # Menú ☰: visibilidad de paneles y disposición
+│   │   │   ├── workspaceLayout.ts  # Preferencias del workspace (localStorage)
 │   │   │   └── page.tsx            # Wrapper con metadata
 │   │   └── [otras herramientas]/
 │   └── api/
@@ -51,6 +54,7 @@ pixlit/
 - **Presión de stylus**: soporte para tablets y lápices digitales
 - **Anti-palma**: filtro inteligente para dibujo con stylus
 - **Temas**: ruled, grid, dotted, blanco
+- **Espacio de trabajo a pantalla completa**: la hoja ocupa todo el fondo disponible (preset "Pantalla", o Carta/A4/A5/… con zoom y pan); las herramientas son paneles flotantes que se pueden mover, plegar, redimensionar, orientar (horizontal/vertical), ocultar y bloquear. La disposición se guarda en `localStorage` (`pixlit-nb-workspace-v1`). `Tab` = modo enfoque (oculta todos los paneles).
 - **Exportación**: PNG, PDF, JSON (para agentes IA), SVG
 - **Autoguardado local**: localStorage cada 60 segundos
 - **Sync en la nube**: Supabase (usuarios autenticados)

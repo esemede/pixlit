@@ -9,6 +9,9 @@ import { useNotebook } from "@/lib/useNotebook";
 import type { NotebookTheme } from "@/lib/supabase/types";
 import NotebookToolsPanel, { type PanelTab } from "./NotebookToolsPanel";
 import NotebooksPanel from "./NotebooksPanel";
+import FloatingPanel from "./FloatingPanel";
+import WorkspaceMenu from "./WorkspaceMenu";
+import { useWorkspaceLayout, PANEL_ORDER } from "./workspaceLayout";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -436,9 +439,9 @@ function mergeCanvases(bg: HTMLCanvasElement, main: HTMLCanvasElement, overlay: 
   return tmp;
 }
 
-const LETTER_RATIO = 11 / 8.5;
-
+// ratio = sheet height / width. 0 = "Pantalla": the sheet fills the whole workspace.
 const CANVAS_PRESETS = [
+  { label: "Pantalla",   ratio: 0         },
   { label: "Carta",      ratio: 11 / 8.5  },
   { label: "A4",         ratio: 297 / 210 },
   { label: "A5",         ratio: 210 / 148 },
@@ -463,7 +466,9 @@ function gradientCoords(dir: string, w: number, h: number): [number, number, num
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
-export default function NotebookClient({ minimal = false, initialNotebookId }: { minimal?: boolean; initialNotebookId?: string }) {
+// `minimal` is kept for API compatibility: every route now renders the same
+// full-screen workspace (sheet as background + floating panels).
+export default function NotebookClient({ initialNotebookId }: { minimal?: boolean; initialNotebookId?: string }) {
   const bgCanvasRef  = useRef<HTMLCanvasElement>(null);
   const canvasRef    = useRef<HTMLCanvasElement>(null);
   const overlayRef   = useRef<HTMLCanvasElement>(null);
@@ -487,9 +492,12 @@ export default function NotebookClient({ minimal = false, initialNotebookId }: {
     lineColor: "rgba(255,255,255,0.035)", marginColor: "rgba(139,92,246,0.08)",
   });
   const [bgGradient,  setBgGradient]  = useState<BgGradient | null>(null);
-  const [canvasRatio, setCanvasRatio] = useState(LETTER_RATIO);
-  const [panelOpen,   setPanelOpen]   = useState(false);
   const [panelTab,    setPanelTab]    = useState<PanelTab>("qr");
+  const { prefs: workspace, update: updateWorkspace, updatePanel, togglePanel, reset: resetWorkspace } = useWorkspaceLayout();
+  const canvasRatio = workspace.paperRatio;
+  const setCanvasRatio = useCallback((ratio: number) => {
+    updateWorkspace(w => ({ ...w, paperRatio: ratio }));
+  }, [updateWorkspace]);
   const [localSavedAt, setLocalSavedAt] = useState<number | null>(null);
   const [zoom, setZoom] = useState(1);
   const [pan,  setPan]  = useState({ x: 0, y: 0 });
@@ -621,10 +629,13 @@ export default function NotebookClient({ minimal = false, initialNotebookId }: {
     if (!vp) return;
     const dpr = window.devicePixelRatio || 1;
     const vpW = vp.offsetWidth;
+    const vpH = vp.offsetHeight;
     if (vpW <= 0) return;
+    // ratio 0 = "Pantalla": the sheet covers the whole visible workspace
+    const ratio = canvasRatioRef.current > 0 ? canvasRatioRef.current : Math.max(vpH, 1) / vpW;
     // Buffer is dpr× the CSS viewport width → physical pixel-perfect
     const bufW = Math.round(vpW * dpr);
-    const bufH = Math.round(vpW * dpr * canvasRatioRef.current);
+    const bufH = Math.round(vpW * dpr * ratio);
     setCanvasSize({ w: bufW, h: bufH });
     // scale(1/dpr) makes CSS display = vpW, matching the viewport exactly
     applyZoomPan(1 / dpr, { x: 0, y: 0 });
@@ -791,6 +802,13 @@ export default function NotebookClient({ minimal = false, initialNotebookId }: {
       realtimeRef.current = null;
     };
   }, [notebookId, redraw]);
+
+  // ── The workspace covers the viewport: lock document scroll while mounted ─
+  useEffect(() => {
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => { document.body.style.overflow = prev; };
+  }, []);
 
   // ── Fullscreen ────────────────────────────────────────────────────────────
   const toggleFullscreen = useCallback(async () => {
@@ -996,7 +1014,14 @@ export default function NotebookClient({ minimal = false, initialNotebookId }: {
   // ── Keyboard shortcuts ────────────────────────────────────────────────────
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.target instanceof HTMLInputElement) return;
+      const t = e.target;
+      if (t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement ||
+          t instanceof HTMLSelectElement || (t instanceof HTMLElement && t.isContentEditable)) return;
+      if (e.key === "Tab" && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        e.preventDefault();
+        updateWorkspace(w => ({ ...w, hideAll: !w.hideAll }));
+        return;
+      }
       if ((e.metaKey || e.ctrlKey) && e.key === "z") { e.preventDefault(); handleUndo(); }
       if ((e.metaKey || e.ctrlKey) && e.key === "s") { e.preventDefault(); saveNow(); }
       if (e.key === "p") setTool("pen");
@@ -1005,7 +1030,7 @@ export default function NotebookClient({ minimal = false, initialNotebookId }: {
       if (e.key === "e") setTool("eraser");
       if (e.key === "s") setShapeMode(v => !v);
       if (e.key === "f") toggleFullscreen();
-      if (e.key === " " && !(e.target instanceof HTMLTextAreaElement)) { e.preventDefault(); isSpaceRef.current = true; }
+      if (e.key === " ") { e.preventDefault(); isSpaceRef.current = true; }
     };
     const onKeyUp = (e: KeyboardEvent) => {
       if (e.key === " ") { isSpaceRef.current = false; spacePanRef.current.active = false; }
@@ -1017,7 +1042,7 @@ export default function NotebookClient({ minimal = false, initialNotebookId }: {
       window.removeEventListener("keyup",   onKeyUp);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [toggleFullscreen]);
+  }, [toggleFullscreen, updateWorkspace]);
 
   // ── Ctrl+Wheel zoom ───────────────────────────────────────────────────────
   useEffect(() => {
@@ -1300,36 +1325,51 @@ export default function NotebookClient({ minimal = false, initialNotebookId }: {
     { label: "Blanco", value: { background: "none",   bgColor: "#ffffff", lineColor: "transparent",             marginColor: "transparent"            } },
   ];
 
-  // ── Divider helper ────────────────────────────────────────────────────────
-  const Div = () => (
-    <div style={{ width: 1, height: 26, background: "#2a2a2a", flexShrink: 0 }} />
+  // ── Divider helper (follows the panel orientation) ───────────────────────
+  const div = (vertical: boolean) => (
+    <div style={vertical
+      ? { height: 1, width: "100%", background: "#2a2a2a", flexShrink: 0 }
+      : { width: 1, height: 26, background: "#2a2a2a", flexShrink: 0 }} />
   );
 
-  // ── Shared JSX ────────────────────────────────────────────────────────────
-  const toolbarJSX = (
-    <div style={{
-      display: "flex", flexWrap: "wrap", gap: "6px",
-      alignItems: "center", padding: "8px 0",
-    }}>
+  const selectStyle: React.CSSProperties = {
+    background: "#141414", border: "1px solid #2a2a2a", borderRadius: 7,
+    color: "#aaa", fontSize: 11, padding: "4px 8px", cursor: "pointer",
+  };
 
-      {/* ── GROUP 1: Drawing tools ── */}
-      <div style={{ display: "flex", gap: "4px", alignItems: "center" }}>
-        {(Object.keys(TOOL_CFG) as DrawTool[]).map(t => (
-          <button
-            key={t}
-            onClick={() => setTool(t)}
-            title={`${TOOL_CFG[t].label} [${t[0]}]`}
-            style={btnTool(tool === t)}
-          >
-            {TOOL_CFG[t].icon}
-          </button>
-        ))}
-      </div>
+  const smallBtn: React.CSSProperties = { ...btnTool(false), fontSize: 11, padding: "4px 9px" };
 
-      <Div />
+  // ── Panel contents ────────────────────────────────────────────────────────
+  const renderToolsPanel = (vertical: boolean) => (
+    <>
+      {(Object.keys(TOOL_CFG) as DrawTool[]).map(t => (
+        <button
+          key={t}
+          onClick={() => setTool(t)}
+          title={`${TOOL_CFG[t].label} [${t[0]}]`}
+          style={btnTool(tool === t)}
+        >
+          {TOOL_CFG[t].icon}
+        </button>
+      ))}
+      {div(vertical)}
+      <button
+        onClick={() => setShapeMode(v => !v)}
+        style={{ ...btnTool(shapeMode), fontSize: 16 }}
+        title="Detección automática de figuras [s]"
+      >⬡</button>
+      <button onClick={handleUndo} title="Deshacer [Ctrl+Z]"
+        style={{ ...btnTool(false), fontSize: 15 }}>↩</button>
+      <button onClick={clearPage} title="Limpiar página"
+        style={{ ...btnTool(false), fontSize: 15 }}>🗑</button>
+    </>
+  );
 
-      {/* ── GROUP 2: Colors + width ── */}
-      <div style={{ display: "flex", gap: "3px", alignItems: "center", flexWrap: "wrap" }}>
+  const renderStylePanel = (vertical: boolean) => (
+    <>
+      <div style={vertical
+        ? { display: "grid", gridTemplateColumns: "repeat(4, 20px)", gap: 4 }
+        : { display: "flex", flexWrap: "wrap", gap: 4, flex: "1 1 auto", minWidth: 0 }}>
         {COLORS.map(c => (
           <button key={c} onClick={() => setColor(c)} title={c} style={{
             width: 20, height: 20, borderRadius: "50%", background: c,
@@ -1345,53 +1385,41 @@ export default function NotebookClient({ minimal = false, initialNotebookId }: {
           style={{
             width: 20, height: 20, borderRadius: "50%",
             border: "2px solid #444", cursor: "pointer",
-            padding: 0, background: "none", flexShrink: 0,
+            padding: 0, background: "none",
           }}
         />
       </div>
-
-      {/* Width slider */}
-      <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+      {div(vertical)}
+      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+        <span style={{
+          width: 22, height: 22, display: "flex", alignItems: "center", justifyContent: "center",
+        }}>
+          <span style={{
+            width: Math.min(20, 2 + lineWidth), height: Math.min(20, 2 + lineWidth),
+            borderRadius: "50%", background: color, border: "1px solid #444",
+          }} />
+        </span>
         <input
           type="range" min={1} max={20} value={lineWidth}
           onChange={e => setLineWidth(Number(e.target.value))}
-          style={{ width: 60, accentColor: "#8b5cf6" }}
+          style={{ width: vertical ? 80 : 90, accentColor: "#8b5cf6" }}
           title={`Grosor: ${lineWidth}`}
         />
-        <span style={{ color: "#555", fontSize: 10, minWidth: 14 }}>{lineWidth}</span>
+        <span style={{ color: "#777", fontSize: 10, minWidth: 14 }}>{lineWidth}</span>
       </div>
+    </>
+  );
 
-      <Div />
-
-      {/* ── GROUP 3: Canvas settings ── */}
-      <button
-        onClick={() => setShapeMode(v => !v)}
-        style={btnToggle(shapeMode)}
-        title="Detección automática de figuras [s]"
-      >
-        ⬡ Figuras
-      </button>
-
-      <button
-        onClick={() => setPalmReject(v => !v)}
-        style={btnToggle(palmReject, palmReject ? "#22c55e" : "#555")}
-        title="Rechazo de palma (táctil)"
-      >
-        {palmReject ? "🤚 Palm ON" : "🤚 Palm OFF"}
-      </button>
-
+  const renderSheetPanel = (vertical: boolean) => (
+    <>
       <select
         value={THEMES.findIndex(t => t.value.background === theme.background)}
         onChange={e => setTheme(THEMES[Number(e.target.value)].value)}
         title="Fondo del cuaderno"
-        style={{
-          background: "#141414", border: "1px solid #2a2a2a", borderRadius: 7,
-          color: "#888", fontSize: 11, padding: "4px 8px", cursor: "pointer",
-        }}
+        style={selectStyle}
       >
         {THEMES.map((t, i) => <option key={i} value={i}>{t.label}</option>)}
       </select>
-
       <select
         value={CANVAS_PRESETS.findIndex(p => Math.abs(p.ratio - canvasRatio) < 0.01)}
         onChange={e => {
@@ -1399,21 +1427,18 @@ export default function NotebookClient({ minimal = false, initialNotebookId }: {
           if (idx >= 0) setCanvasRatio(CANVAS_PRESETS[idx].ratio);
         }}
         title="Tamaño de hoja"
-        style={{
-          background: "#141414", border: "1px solid #2a2a2a", borderRadius: 7,
-          color: "#888", fontSize: 11, padding: "4px 8px", cursor: "pointer",
-        }}
+        style={selectStyle}
       >
         {CANVAS_PRESETS.map((p, i) => <option key={i} value={i}>📄 {p.label}</option>)}
       </select>
-
-      {tabletDetected && (
-        <span style={{ fontSize: 10, color: "#22c55e" }} title="Stylus detectado">✒️</span>
-      )}
-
-      <Div />
-
-      {/* ── GROUP 4: Zoom ── */}
+      <button
+        onClick={() => setPalmReject(v => !v)}
+        style={btnToggle(palmReject, palmReject ? "#22c55e" : "#555")}
+        title="Rechazo de palma (táctil)"
+      >
+        {palmReject ? "🤚 Palm ON" : "🤚 Palm OFF"}
+      </button>
+      {div(vertical)}
       <div style={{ display: "flex", alignItems: "center", gap: 3 }}>
         <button
           onClick={() => applyZoomPan(Math.max(0.1, zoomRef.current / 1.2), panRef.current)}
@@ -1437,7 +1462,7 @@ export default function NotebookClient({ minimal = false, initialNotebookId }: {
           title="Nivel de zoom"
           style={{
             background: "none", border: "1px solid #2a2a2a", borderRadius: 6,
-            color: "#666", fontSize: 10, padding: "2px 6px", width: 46,
+            color: "#888", fontSize: 10, padding: "2px 6px", width: 46,
             textAlign: "center", outline: "none",
           }}
         />
@@ -1446,101 +1471,24 @@ export default function NotebookClient({ minimal = false, initialNotebookId }: {
           style={{ ...btnTool(false), padding: "2px 8px", fontSize: 14 }}
           title="Acercar"
         >+</button>
-      </div>
-
-      <div style={{ flex: 1 }} />
-
-      {/* ── GROUP 5: Edit actions ── */}
-      <button onClick={handleUndo} title="Deshacer [Ctrl+Z]"
-        style={{ ...btnTool(false), fontSize: 13, padding: "4px 9px" }}>↩</button>
-      <button onClick={clearPage}  title="Limpiar página"
-        style={{ ...btnTool(false), fontSize: 12, padding: "4px 9px" }}>🗑</button>
-
-      <Div />
-
-      {/* ── GROUP 6: Export ── */}
-      {role !== "view" && (
-        <button onClick={exportPNG}        title="Exportar PNG"  style={{ ...btnTool(false), fontSize: 11, padding: "4px 9px" }}>PNG</button>
-      )}
-      {role !== "view" && (
-        <button onClick={exportPDF}        title="Exportar PDF"  style={{ ...btnTool(false), fontSize: 11, padding: "4px 9px" }}>PDF</button>
-      )}
-      {role !== "view" && (
-        <button onClick={exportAgentJSON}  title="JSON para agentes IA" style={{ ...btnTool(false), fontSize: 11, padding: "4px 9px" }}>🤖 JSON</button>
-      )}
-
-      <Div />
-
-      {/* ── GROUP 7: View ── */}
-      <button
-        onClick={toggleFullscreen}
-        title={isFullscreen ? "Salir pantalla completa [f]" : "Pantalla completa [f]"}
-        style={{ ...btnTool(isFullscreen), fontSize: 14, padding: "4px 9px" }}
-      >⛶</button>
-
-      <button
-        onClick={() => setPanelOpen(v => !v)}
-        title="Herramientas: QR · Colores · Gradientes · Voz"
-        style={{ ...btnTool(panelOpen), fontSize: 14, padding: "4px 10px" }}
-      >🛠️</button>
-
-      <Div />
-
-      {role === "view" && (
-        <span style={{
-          fontSize: 11, fontWeight: 700, color: "#86efac",
-          background: "rgba(34,197,94,0.15)", border: "1px solid #22c55e44",
-          borderRadius: 999, padding: "2px 10px",
-        }}>
-          Solo lectura
-        </span>
-      )}
-
-      {/* ── GROUP 8: Save / Notebooks ── */}
-      <button
-        onClick={saveNow}
-        disabled={saving || saveState.status === "saving"}
-        title={isAuth ? "Guardar [Ctrl+S]" : "Guardar localmente [Ctrl+S]"}
-        style={{
-          ...btnTool(false), fontSize: 11, padding: "4px 10px",
-          opacity: saving || saveState.status === "saving" ? 0.5 : 1,
-          color:
-            saving || saveState.status === "saving" ? "#555"
-            : saveState.status === "saved"  ? "#22c55e"
-            : saveState.status === "error"  ? "#ef4444"
-            : "#888",
-        }}
-      >
-        {saving || saveState.status === "saving" ? "⏳"
-         : saveState.status === "saved"  ? "✓ Guardado"
-         : saveState.status === "error"  ? "⚠ Error"
-         : "💾 Guardar"}
-      </button>
-
-      {isAuth ? (
         <button
-          onClick={() => setNotebooksPanelOpen(true)}
-          title="Mis cuadernos"
-          style={{ ...btnTool(false), fontSize: 11, padding: "4px 10px" }}
-        >
-          📚 Cuadernos
-        </button>
-      ) : (
-        <Link href="/auth/login?next=/" style={{
-          fontSize: 11, color: "#a78bfa", textDecoration: "none",
-          padding: "4px 10px", border: "1px solid #8b5cf633", borderRadius: 8,
-        }}>
-          ☁ Sync
-        </Link>
+          onClick={applyFit}
+          style={{ ...btnTool(false), padding: "2px 8px", fontSize: 13 }}
+          title="Ajustar hoja a la pantalla"
+        >⤢</button>
+      </div>
+      {tabletDetected && (
+        <span style={{ fontSize: 10, color: "#22c55e" }} title="Stylus detectado">✒️ Stylus</span>
       )}
-
-    </div>
+    </>
   );
-  const pagesBarJSX = (
-    <div style={{ display: "flex", gap: "5px", alignItems: "center", padding: "0 0 8px" }}>
+
+  const renderPagesPanel = () => (
+    <>
       {pages.map((_, i) => (
         <div key={i} style={{ display: "flex", alignItems: "stretch" }}>
           <button onClick={() => setPageIdx(i)} style={{
+            flex: 1,
             background:   pageIdx === i ? "#8b5cf6" : "rgba(255,255,255,0.06)",
             border:       pageIdx === i ? "1px solid #8b5cf6" : "1px solid #333",
             borderRadius: pages.length > 1 ? "6px 0 0 6px" : "6px",
@@ -1569,159 +1517,193 @@ export default function NotebookClient({ minimal = false, initialNotebookId }: {
       <button onClick={addPage} style={{
         background: "rgba(255,255,255,0.03)", border: "1px dashed #444",
         borderRadius: "6px", padding: "3px 9px",
-        color: "#666", cursor: "pointer", fontSize: "12px",
+        color: "#888", cursor: "pointer", fontSize: "12px",
       }}>+ Página</button>
-
       {notebookId && isAuth && (
-        <span style={{ fontSize: 10, color: "#444", marginLeft: 8 }}>
+        <span style={{ fontSize: 10, color: "#555" }}>
           ID: {notebookId.slice(0, 8)}
         </span>
       )}
-    </div>
+    </>
+  );
+
+  const renderFilePanel = (vertical: boolean) => (
+    <>
+      {role === "view" && (
+        <span style={{
+          fontSize: 11, fontWeight: 700, color: "#86efac",
+          background: "rgba(34,197,94,0.15)", border: "1px solid #22c55e44",
+          borderRadius: 999, padding: "2px 10px", textAlign: "center",
+        }}>
+          Solo lectura
+        </span>
+      )}
+      <button
+        onClick={saveNow}
+        disabled={saving || saveState.status === "saving"}
+        title={isAuth ? "Guardar [Ctrl+S]" : "Guardar localmente [Ctrl+S]"}
+        style={{
+          ...smallBtn,
+          opacity: saving || saveState.status === "saving" ? 0.5 : 1,
+          color:
+            saving || saveState.status === "saving" ? "#555"
+            : saveState.status === "saved"  ? "#22c55e"
+            : saveState.status === "error"  ? "#ef4444"
+            : "#aaa",
+        }}
+      >
+        {saving || saveState.status === "saving" ? "⏳"
+         : saveState.status === "saved"  ? "✓ Guardado"
+         : saveState.status === "error"  ? "⚠ Error"
+         : "💾 Guardar"}
+      </button>
+      {isAuth ? (
+        <button
+          onClick={() => setNotebooksPanelOpen(true)}
+          title="Mis cuadernos"
+          style={smallBtn}
+        >
+          📚 Cuadernos
+        </button>
+      ) : (
+        <Link href="/auth/login?next=/" style={{
+          fontSize: 11, color: "#a78bfa", textDecoration: "none", textAlign: "center",
+          padding: "4px 10px", border: "1px solid #8b5cf633", borderRadius: 8,
+        }}>
+          ☁ Sync
+        </Link>
+      )}
+      {role !== "view" && (
+        <>
+          {div(vertical)}
+          <button onClick={exportPNG}       title="Exportar PNG"         style={smallBtn}>PNG</button>
+          <button onClick={exportPDF}       title="Exportar PDF"         style={smallBtn}>PDF</button>
+          <button onClick={exportAgentJSON} title="JSON para agentes IA" style={smallBtn}>🤖 JSON</button>
+        </>
+      )}
+      {div(vertical)}
+      <button
+        onClick={toggleFullscreen}
+        title={isFullscreen ? "Salir pantalla completa [f]" : "Pantalla completa [f]"}
+        style={{ ...btnTool(isFullscreen), fontSize: 14, padding: "4px 9px" }}
+      >⛶</button>
+      <button
+        onClick={() => togglePanel("extras")}
+        title="Extras: QR · Colores · Gradientes"
+        style={{ ...btnTool(workspace.panels.extras.visible && !workspace.hideAll), fontSize: 14, padding: "4px 10px" }}
+      >🛠️</button>
+    </>
+  );
+
+  const renderExtrasPanel = () => (
+    <NotebookToolsPanel
+      activeTab={panelTab}
+      onTabChange={setPanelTab}
+      onInsertImage={insertImage}
+      onSetBgColor={handleSetBgColor}
+      onSetBgGradient={handleSetBgGradient}
+      onClearGradient={handleClearGradient}
+      onSetDrawColor={setColor}
+    />
+  );
+
+  const panelContent = {
+    tools:  (o: string) => renderToolsPanel(o === "vertical"),
+    style:  (o: string) => renderStylePanel(o === "vertical"),
+    sheet:  (o: string) => renderSheetPanel(o === "vertical"),
+    pages:  () => renderPagesPanel(),
+    file:   (o: string) => renderFilePanel(o === "vertical"),
+    extras: () => renderExtrasPanel(),
+  };
+
+  const statusBadge = (bg: string, border: string, fg: string, text: string) => (
+    <span style={{
+      background: bg, border: `1px solid ${border}`, borderRadius: 6,
+      padding: "3px 10px", fontSize: 10, fontWeight: 700, color: fg,
+      pointerEvents: "none", whiteSpace: "nowrap",
+    }}>{text}</span>
   );
 
   // ── Render ────────────────────────────────────────────────────────────────
+  // The workspace fills the viewport below the navbar (or the whole screen in
+  // fullscreen). The sheet is the background; every control floats on top.
   return (
-    <div style={minimal
-      ? { height: "calc(100vh - 64px)", display: "flex", flexDirection: "column", background: "var(--background)" }
-      : { minHeight: "100vh", background: "var(--background)" }
-    }>
-
-      {/* Page header — only in non-minimal, non-fullscreen mode */}
-      {!minimal && !isFullscreen && (
-        <div style={{ maxWidth: 900, margin: "0 auto", padding: "32px 24px 0" }}>
-          <h1 style={{ fontSize: 28, fontWeight: 800, color: "white", marginBottom: 6 }}>
-            📓 Cuaderno de Notas
-          </h1>
-          <p style={{ color: "#888", fontSize: 14, marginBottom: 20 }}>
-            Dibuja con stylus, touch o mouse. Tamaño carta, responsive y exportable a PNG o PDF.
-          </p>
-        </div>
-      )}
-
-      {/* Sticky toolbar — only when not fullscreen */}
-      {!isFullscreen && (
-        <div style={{
-          position: minimal ? "sticky" : "sticky",
-          top: 64, zIndex: 40,
-          background: "rgba(15,15,15,0.97)", backdropFilter: "blur(10px)",
-          borderBottom: "1px solid #2a2a2a", borderTop: "1px solid #2a2a2a",
-          padding: "0 24px",
-          flexShrink: 0,
-        }}>
-          {toolbarJSX}
-          {pagesBarJSX}
-        </div>
-      )}
-
-      {/* Canvas container */}
+    <div
+      ref={containerRef}
+      style={{
+        position: "fixed",
+        top: isFullscreen ? 0 : 64, left: 0, right: 0, bottom: 0,
+        zIndex: 45,
+        background: "#0b0b10",
+        overflow: "hidden",
+      }}
+    >
+      {/* Canvas viewport — the whole workspace */}
       <div
-        ref={containerRef}
-        style={isFullscreen ? {
-          position: "fixed", inset: 0, zIndex: 9999,
-          background: "#1e1e2e",
-          display: "flex", flexDirection: "column",
-        } : minimal ? {
-          flex: 1,
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "center",
-          justifyContent: "center",
-          padding: "12px 24px",
-          minHeight: 0,
-          position: "relative",
-        } : {
-          padding: "24px",
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "center",
-          position: "relative",
+        ref={wrapperRef}
+        style={{
+          position: "absolute", inset: 0,
+          overflow: "hidden",
+          touchAction: "none", userSelect: "none",
+          WebkitUserSelect: "none",
         }}
       >
-        {/* Toolbar inside fullscreen overlay */}
-        {isFullscreen && (
-          <div style={{
-            width: "100%",
-            background: "rgba(15,15,20,0.97)",
-            borderBottom: "1px solid #2a2a2a",
-            padding: "0 16px", flexShrink: 0,
-          }}>
-            {toolbarJSX}
-            {pagesBarJSX}
-          </div>
-        )}
-
-        {/* Canvas viewport — fills all available width, fixed height, clips overflow */}
-        <div
-          ref={wrapperRef}
-          style={isFullscreen ? {
-            position: "relative",
-            flex: 1, width: "100%", minHeight: 0,
-            overflow: "hidden",
-            touchAction: "none", userSelect: "none",
-            WebkitUserSelect: "none",
-          } : {
-            position: "relative",
-            width: "100%",
-            height: "calc(100vh - 64px - 160px)",
-            borderRadius: 10,
-            overflow: "hidden",
-            border: "1px solid #2a2a2a",
-            boxShadow: "0 8px 40px rgba(0,0,0,0.5)",
-            touchAction: "none", userSelect: "none",
-            WebkitUserSelect: "none",
-          }}
-        >
-          {/* Zoom layer — natural document size, CSS transform for zoom/pan */}
-          <div ref={zoomLayerRef} style={{
-            position: "absolute", top: 0, left: 0,
-            width: canvasSize.w, height: canvasSize.h,
-            transform: `translate(${pan.x}px,${pan.y}px) scale(${zoom})`,
-            transformOrigin: "0 0",
-          }}>
-            <canvas ref={bgCanvasRef} width={canvasSize.w} height={canvasSize.h}
-              style={{ position: "absolute", inset: 0, width: "100%", height: "100%" }} />
-            <canvas ref={canvasRef} width={canvasSize.w} height={canvasSize.h}
-              style={{ position: "absolute", inset: 0, width: "100%", height: "100%" }} />
-            <canvas ref={overlayRef} width={canvasSize.w} height={canvasSize.h}
-              style={{
-                position: "absolute", inset: 0, width: "100%", height: "100%",
-                cursor: isSpaceRef.current ? "grab" : "crosshair",
-              }} />
-            {shapeMode && (
-              <div style={{
-                position: "absolute", top: 10, right: 10,
-                background: "rgba(139,92,246,0.85)", borderRadius: 6,
-                padding: "3px 10px", fontSize: 11, color: "white", fontWeight: 700,
-                pointerEvents: "none",
-              }}>⬡ Figuras activo</div>
-            )}
-            {realtimeRef.current && (
-              <div style={{
-                position: "absolute", top: 10, left: 10,
-                background: "rgba(34,197,94,0.2)", border: "1px solid rgba(34,197,94,0.4)",
-                borderRadius: 6, padding: "3px 10px", fontSize: 10, color: "#86efac",
-                pointerEvents: "none",
-              }}>● En vivo</div>
-            )}
-          </div>
+        {/* Zoom layer — natural document size, CSS transform for zoom/pan */}
+        <div ref={zoomLayerRef} style={{
+          position: "absolute", top: 0, left: 0,
+          width: canvasSize.w, height: canvasSize.h,
+          transform: `translate(${pan.x}px,${pan.y}px) scale(${zoom})`,
+          transformOrigin: "0 0",
+          boxShadow: "0 0 0 1px rgba(255,255,255,0.04), 0 30px 80px rgba(0,0,0,0.55)",
+        }}>
+          <canvas ref={bgCanvasRef} width={canvasSize.w} height={canvasSize.h}
+            style={{ position: "absolute", inset: 0, width: "100%", height: "100%" }} />
+          <canvas ref={canvasRef} width={canvasSize.w} height={canvasSize.h}
+            style={{ position: "absolute", inset: 0, width: "100%", height: "100%" }} />
+          <canvas ref={overlayRef} width={canvasSize.w} height={canvasSize.h}
+            style={{
+              position: "absolute", inset: 0, width: "100%", height: "100%",
+              cursor: "crosshair",
+            }} />
         </div>
-
-        {/* Tools panel (QR / Color / Gradient) */}
-        <NotebookToolsPanel
-          isOpen={panelOpen}
-          activeTab={panelTab}
-          onClose={() => setPanelOpen(false)}
-          onTabChange={setPanelTab}
-          onInsertImage={insertImage}
-          onSetBgColor={handleSetBgColor}
-          onSetBgGradient={handleSetBgGradient}
-          onClearGradient={handleClearGradient}
-          onSetDrawColor={setColor}
-        />
       </div>
 
-      {/* Notebooks manager modal */}
+      {/* Floating panels */}
+      {!workspace.hideAll && PANEL_ORDER.map(id => {
+        const st = workspace.panels[id];
+        if (!st.visible) return null;
+        return (
+          <FloatingPanel
+            key={id}
+            id={id}
+            state={st}
+            opacity={workspace.opacity}
+            locked={workspace.locked}
+            onChange={patch => updatePanel(id, patch)}
+            minW={id === "extras" ? 280 : 60}
+          >
+            {panelContent[id]}
+          </FloatingPanel>
+        );
+      })}
+
+      {/* Workspace launcher: panels visibility + layout options */}
+      <WorkspaceMenu
+        prefs={workspace}
+        onToggle={togglePanel}
+        onSetOpacity={v => updateWorkspace(w => ({ ...w, opacity: v }))}
+        onSetLocked={v => updateWorkspace(w => ({ ...w, locked: v }))}
+        onSetHideAll={v => updateWorkspace(w => ({ ...w, hideAll: v }))}
+        onReset={resetWorkspace}
+        badges={
+          <div style={{ display: "flex", gap: 6, paddingBottom: 9 }}>
+            {shapeMode && statusBadge("rgba(139,92,246,0.85)", "#8b5cf6", "white", "⬡ Figuras activo")}
+            {notebookId && statusBadge("rgba(34,197,94,0.2)", "rgba(34,197,94,0.4)", "#86efac", "● En vivo")}
+          </div>
+        }
+      />
+
+      {/* Notebooks manager modal (inside the container so it works in fullscreen) */}
       <NotebooksPanel
         isOpen={notebooksPanelOpen}
         notebooks={notebooks}
@@ -1734,20 +1716,6 @@ export default function NotebookClient({ minimal = false, initialNotebookId }: {
         sharedNotebooks={sharedNotebooks}
         onSwitchShared={(id) => { switchNotebook(id); setNotebooksPanelOpen(false); router.push(`/tools/notebook/${id}`); }}
       />
-
-      {/* Footer hints — only in non-minimal, non-fullscreen mode */}
-      {!minimal && !isFullscreen && (
-        <div style={{
-          maxWidth: 900, margin: "12px auto 40px", padding: "0 24px",
-          display: "flex", gap: 16, flexWrap: "wrap", color: "#555", fontSize: 11,
-        }}>
-          <span>✒️ Stylus + anti-palma</span>
-          <span>⬡ Modo Figuras activo con "s"</span>
-          <span>🛠️ QR · Colores · Gradientes</span>
-          <span>🤖 JSON para agentes IA</span>
-          <span>⌨️ p·m·h·e · s · f · Ctrl+Z</span>
-        </div>
-      )}
     </div>
   );
 }
