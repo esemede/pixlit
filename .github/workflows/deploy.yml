@@ -86,17 +86,24 @@ jobs:
 
       # ── Preview (PR) ──────────────────────────────────────────────────────
       - name: Deploy preview (PR)
+        id: preview
         if: github.event_name == 'pull_request'
-        run: pnpm exec wrangler deploy --config wrangler.jsonc --name pixlit-pr-${{ github.event.pull_request.number }}
+        shell: bash
+        run: |
+          pnpm exec wrangler deploy --config wrangler.jsonc --name pixlit-pr-${{ github.event.pull_request.number }} | tee deploy.log
+          # La URL real incluye el subdominio de la cuenta: https://<worker>.<cuenta>.workers.dev
+          url=$(grep -oE 'https://[A-Za-z0-9.-]+\.workers\.dev' deploy.log | head -n1)
+          echo "url=${url}" >> "$GITHUB_OUTPUT"
 
       - name: Comment PR with preview URL
         if: github.event_name == 'pull_request'
         uses: actions/github-script@v7
+        env:
+          PREVIEW_URL: ${{ steps.preview.outputs.url }}
         with:
           script: |
             const prNum = context.issue.number;
-            const workerName = `pixlit-pr-${prNum}`;
-            const previewUrl = `https://${workerName}.workers.dev`;
+            const previewUrl = process.env.PREVIEW_URL || '(no se pudo leer la URL; revisa el log del paso "Deploy preview")';
             const body = [
               '## 🚀 Preview desplegado en Cloudflare Workers',
               '',
