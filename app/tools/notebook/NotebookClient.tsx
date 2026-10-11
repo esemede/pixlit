@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import type { RealtimeChannel } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/client";
 import { useNotebook } from "@/lib/useNotebook";
+import { useNavbarHeight } from "@/components/NavbarContext";
 import type { NotebookTheme } from "@/lib/supabase/types";
 import NotebookToolsPanel, { type PanelTab } from "./NotebookToolsPanel";
 import NotebooksPanel from "./NotebooksPanel";
@@ -494,6 +495,7 @@ export default function NotebookClient({ initialNotebookId }: { minimal?: boolea
   const [bgGradient,  setBgGradient]  = useState<BgGradient | null>(null);
   const [panelTab,    setPanelTab]    = useState<PanelTab>("qr");
   const { prefs: workspace, update: updateWorkspace, updatePanel, togglePanel, reset: resetWorkspace } = useWorkspaceLayout();
+  const navbarHeight = useNavbarHeight();
   const canvasRatio = workspace.paperRatio;
   const setCanvasRatio = useCallback((ratio: number) => {
     updateWorkspace(w => ({ ...w, paperRatio: ratio }));
@@ -1632,10 +1634,11 @@ export default function NotebookClient({ initialNotebookId }: { minimal?: boolea
       ref={containerRef}
       style={{
         position: "fixed",
-        top: isFullscreen ? 0 : 64, left: 0, right: 0, bottom: 0,
+        top: isFullscreen ? 0 : navbarHeight, left: 0, right: 0, bottom: 0,
         zIndex: 45,
         background: "#0b0b10",
         overflow: "hidden",
+        transition: "top 0.3s ease",
       }}
     >
       {/* Canvas viewport — the whole workspace */}

@@ -2,6 +2,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
+import { NavbarProvider } from "@/components/NavbarContext";
+import MainContent from "@/components/MainContent";
 
 export const metadata: Metadata = {
   title: "Pixlit - Herramientas Online Gratis",
@@ -22,11 +24,11 @@ export default function RootLayout({
   return (
     <html lang="es">
       <body>
-        <Navbar />
-        <main className="pt-16 min-h-screen">
-          {children}
-        </main>
-        <Footer />
+        <NavbarProvider>
+          <Navbar />
+          <MainContent>{children}</MainContent>
+          <Footer />
+        </NavbarProvider>
       </body>
     </html>
   );
