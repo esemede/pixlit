@@ -56,8 +56,8 @@ export default function ClipboardClient({ userId }: { userId: string }) {
       onPeers: setPeers, onItem: upsert, onStatus: setStatus,
     });
     meshRef.current = mesh;
-    mesh.start();
     setActive(true);
+    void mesh.start().catch(() => setStatus("error"));
   };
 
   const disconnect = () => {

@@ -54,9 +54,12 @@ export class ClipboardMesh {
 
   constructor(private o: MeshOptions) {}
 
-  start() {
+  async start() {
     const { supabase, userId } = this.o;
-    this.ch = supabase.channel(`clipboard:${userId}`, { config: { broadcast: { self: false } } });
+    // Canal privado: Realtime valida la política RLS de la migración 006 con el JWT del usuario.
+    await supabase.realtime.setAuth();
+    if (this.stopped) return;
+    this.ch = supabase.channel(`clipboard:${userId}`, { config: { private: true, broadcast: { self: false } } });
     this.ch.on("broadcast", { event: "sig" }, ({ payload }) => { void this.onSignal(payload); });
     this.ch.subscribe((status) => {
       if (status === "SUBSCRIBED") { this.o.onStatus("ready"); void this.send({ kind: "hello", name: this.o.deviceName }); }
