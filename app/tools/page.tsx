@@ -16,6 +16,12 @@ const tools = [
     highlight: true,
   },
   {
+    href: "/tools/clipboard",
+    icon: "📋",
+    name: "Portapapeles entre dispositivos",
+    desc: "Pasa texto y archivos entre tus dispositivos, de navegador a navegador y cifrado de extremo a extremo. Requiere iniciar sesión.",
+  },
+  {
     href: "/tools/qr-generator",
     icon: "🔲",
     name: "Generador QR",
